@@ -31,7 +31,8 @@ class FileInfo:
     modified_at: datetime
     content_hash: Optional[str] = None
     category: Optional[str] = None
-    
+    content_text: Optional[str] = None
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -93,32 +94,37 @@ def should_skip(path: Path, exclude_patterns: list) -> bool:
 def _scan_and_hash_file(args: Tuple) -> Optional[Dict]:
     """
     Worker function: scan single file and compute hash.
+    Also extracts text content for supported file types.
     Returns dict for easy serialization across processes.
     """
     file_path_str, category, min_size, hash_algo, exclude_patterns = args
-    
+
     file_path = Path(file_path_str)
-    
+
     # Skip excluded files
     if should_skip(file_path, exclude_patterns):
         return None
-    
+
     # Skip symlinks
     if file_path.is_symlink():
         return None
-    
+
     try:
         stat = file_path.stat()
     except (OSError, PermissionError):
         return None
-    
+
     # Skip small files
     if stat.st_size < min_size:
         return None
-    
+
     # Compute hash
     content_hash = compute_hash(file_path_str, hash_algo)
-    
+
+    # Extract text content for supported types
+    from src.extractors import extract_text
+    content_text = extract_text(file_path_str)
+
     return {
         "path": file_path_str,
         "name": file_path.name,
@@ -127,7 +133,8 @@ def _scan_and_hash_file(args: Tuple) -> Optional[Dict]:
         "created_at": datetime.fromtimestamp(stat.st_ctime),
         "modified_at": datetime.fromtimestamp(stat.st_mtime),
         "content_hash": content_hash,
-        "category": category
+        "category": category,
+        "content_text": content_text
     }
 
 

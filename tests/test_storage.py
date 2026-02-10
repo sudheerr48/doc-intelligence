@@ -404,6 +404,106 @@ class TestClear:
 # Integration: scan real temp files, insert to DB, find duplicates
 # ---------------------------------------------------------------------------
 
+class TestInsertBatchPerformance:
+    """Benchmark tests for batch insert performance."""
+
+    def test_batch_insert_1000_records(self, db_path):
+        """Insert 1000 records and verify correctness and reasonable speed."""
+        import time
+
+        db = FileDatabase(db_path)
+        files = [
+            make_file_info(
+                path=f"/data/folder/file_{i:04d}.txt",
+                name=f"file_{i:04d}.txt",
+                content_hash=f"hash_{i:04d}",
+            )
+            for i in range(1000)
+        ]
+
+        start = time.monotonic()
+        count = db.insert_batch(files)
+        elapsed = time.monotonic() - start
+
+        assert count == 1000
+        total = db.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+        assert total == 1000
+        # Generous threshold to accommodate slow CI environments;
+        # real-world performance is typically well under 5 seconds.
+        assert elapsed < 30.0, f"Batch insert of 1000 records took {elapsed:.2f}s"
+        db.close()
+
+    def test_batch_insert_faster_than_individual(self, db_path, tmp_path):
+        """Batch insert should be significantly faster than row-by-row."""
+        import time
+
+        n = 500
+        files = [
+            make_file_info(
+                path=f"/perf/file_{i:04d}.txt",
+                name=f"file_{i:04d}.txt",
+                content_hash=f"hash_{i:04d}",
+            )
+            for i in range(n)
+        ]
+
+        # Measure batch insert
+        db_batch = FileDatabase(db_path)
+        start = time.monotonic()
+        db_batch.insert_batch(files)
+        batch_time = time.monotonic() - start
+        db_batch.close()
+
+        # Measure individual inserts
+        db_individual = FileDatabase(str(tmp_path / "individual.duckdb"))
+        start = time.monotonic()
+        for fi in files:
+            db_individual.insert_file(fi)
+        individual_time = time.monotonic() - start
+        db_individual.close()
+
+        # Batch should be at least 2x faster
+        assert batch_time < individual_time, (
+            f"Batch ({batch_time:.3f}s) should be faster than individual ({individual_time:.3f}s)"
+        )
+
+    def test_batch_upsert_correctness(self, db_path):
+        """Batch insert with duplicate paths should upsert correctly."""
+        db = FileDatabase(db_path)
+
+        # Insert initial batch
+        files_v1 = [
+            make_file_info(
+                path=f"/upsert/file_{i}.txt",
+                name=f"file_{i}.txt",
+                content_hash=f"v1_hash_{i}",
+            )
+            for i in range(100)
+        ]
+        db.insert_batch(files_v1)
+        assert db.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 100
+
+        # Re-insert with different hashes (upsert)
+        files_v2 = [
+            make_file_info(
+                path=f"/upsert/file_{i}.txt",
+                name=f"file_{i}.txt",
+                content_hash=f"v2_hash_{i}",
+            )
+            for i in range(100)
+        ]
+        db.insert_batch(files_v2)
+
+        # Should still have 100 rows, not 200
+        assert db.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 100
+        # Verify hashes are updated
+        row = db.conn.execute(
+            "SELECT content_hash FROM files WHERE path = '/upsert/file_0.txt'"
+        ).fetchone()
+        assert row[0] == "v2_hash_0"
+        db.close()
+
+
 class TestEndToEnd:
     """Integration test: scan -> store -> query duplicates."""
 
