@@ -20,6 +20,7 @@ dev = [
 ]
 
 [project.scripts]
+doc-intelligence = "scripts.cli:main"
 doc-scan = "scripts.scan:main"
 doc-search = "scripts.search:main"
 doc-duplicates = "scripts.find_duplicates:main"
