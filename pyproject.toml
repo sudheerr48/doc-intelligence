@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml>=6.0",
     "tqdm>=4.66.0",
     "pypdf>=3.0.0",
+    "watchdog>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ doc-scan = "scripts.scan:main"
 doc-search = "scripts.search:main"
 doc-duplicates = "scripts.find_duplicates:main"
 doc-cleanup = "scripts.cleanup:main"
+doc-watch = "scripts.watch:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

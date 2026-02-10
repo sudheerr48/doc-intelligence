@@ -89,6 +89,17 @@ def cleanup(
 
 
 @app.command()
+def watch(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    path: Optional[str] = typer.Option(None, "--path", "-p", help="Watch a specific directory"),
+    category: str = typer.Option("watched", "--category", help="Category label for watched files"),
+):
+    """Watch directories for file changes and update the index."""
+    from scripts.watch import run_watch
+    run_watch(config_path=config, path=path, category=category)
+
+
+@app.command()
 def stats(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
 ):
