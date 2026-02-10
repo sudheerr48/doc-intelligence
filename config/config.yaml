@@ -1,0 +1,49 @@
+# Doc Intelligence v1.0 Configuration
+# ====================================
+# Customize these paths for your system
+
+scan_folders:
+  - path: ~/Documents
+    category: documents
+  - path: ~/Downloads
+    category: downloads
+  - path: ~/Desktop
+    category: desktop
+
+# File types to index (empty = all files)
+include_extensions: []  # e.g., [".pdf", ".docx", ".jpg"]
+
+# Files/folders to skip
+exclude_patterns:
+  - ".DS_Store"
+  - ".git"
+  - "__pycache__"
+  - "*.pyc"
+  - ".venv"
+  - "venv"
+  - "node_modules"
+  - ".next"
+  - ".cache"
+  - "*.egg-info"
+  - "dist"
+  - "build"
+  - ".tox"
+  - ".pytest_cache"
+  - ".mypy_cache"
+
+# Duplicate detection
+deduplication:
+  hash_algorithm: xxhash  # Options: xxhash (fast), sha256, md5
+  min_size_bytes: 1024    # Skip files smaller than 1KB
+
+# Database
+database:
+  path: ./data/files.duckdb
+
+# Staging folder for deletion candidates
+staging:
+  path: ~/_TO_DELETE
+
+# Output
+reports:
+  output_dir: ./data/reports

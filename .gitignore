@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Data files (don't commit your personal file index!)
+data/
+*.duckdb
+*.duckdb.wal
+
+# Logs
+*.log
+scan_output.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with personal paths (user should create their own)
+# Uncomment if you want users to create their own config:
+# config/config.yaml
