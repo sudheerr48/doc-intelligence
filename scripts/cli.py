@@ -51,10 +51,17 @@ def duplicates(
     min_size: Optional[int] = typer.Option(None, "--min-size", "-m", help="Minimum file size in bytes to consider"),
     limit: int = typer.Option(20, "--limit", "-l", help="Maximum number of duplicate sets to display"),
     export_csv: Optional[str] = typer.Option(None, "--export-csv", "-e", help="Export duplicates to CSV file"),
+    auto_stage: bool = typer.Option(False, "--auto-stage", help="Automatically stage duplicates for deletion (keeps newest)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview staging without actually moving files"),
+    staging_dir: Optional[str] = typer.Option(None, "--staging-dir", help="Custom staging directory path"),
 ):
     """Find and report duplicate files."""
     from scripts.find_duplicates import run_duplicates
-    run_duplicates(config_path=config, min_size=min_size, limit=limit, export_csv=export_csv)
+    run_duplicates(
+        config_path=config, min_size=min_size, limit=limit,
+        export_csv=export_csv, auto_stage=auto_stage, dry_run=dry_run,
+        staging_dir=staging_dir,
+    )
 
 
 @app.command()
@@ -67,6 +74,18 @@ def search(
     """Search for files in the database."""
     from scripts.search import run_search
     run_search(query=query, config_path=config, limit=limit, extension=extension)
+
+
+@app.command()
+def cleanup(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    confirm: bool = typer.Option(False, "--confirm", help="Permanently delete staged files"),
+    restore: bool = typer.Option(False, "--restore", help="Restore staged files to original locations"),
+    staging_dir: Optional[str] = typer.Option(None, "--staging-dir", help="Custom staging directory path"),
+):
+    """Review and manage files staged for deletion."""
+    from scripts.cleanup import run_cleanup
+    run_cleanup(config_path=config, confirm=confirm, restore=restore, staging_dir=staging_dir)
 
 
 @app.command()

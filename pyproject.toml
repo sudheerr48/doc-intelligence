@@ -25,6 +25,7 @@ doc-intelligence = "scripts.cli:main"
 doc-scan = "scripts.scan:main"
 doc-search = "scripts.search:main"
 doc-duplicates = "scripts.find_duplicates:main"
+doc-cleanup = "scripts.cleanup:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
