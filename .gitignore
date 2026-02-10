@@ -27,6 +27,9 @@ scan_output.log
 .DS_Store
 Thumbs.db
 
+# Test data (NapierOne dataset files - too large for git)
+test_data/
+
 # Config with personal paths (user should create their own)
 # Uncomment if you want users to create their own config:
 # config/config.yaml
