@@ -1,3 +1,3 @@
-# Doc Intelligence v1.0
-__version__ = "1.0.0"
+# Doc Intelligence v2.0
+__version__ = "2.0.0"
 
