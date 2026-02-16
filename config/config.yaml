@@ -9,6 +9,9 @@ scan_folders:
     category: downloads
   - path: ~/Desktop
     category: desktop
+  # NapierOne test dataset (800+ files across 8 types)
+  - path: ./test_data/napierone
+    category: napierone-test
 
 # File types to index (empty = all files)
 include_extensions: []  # e.g., [".pdf", ".docx", ".jpg"]
