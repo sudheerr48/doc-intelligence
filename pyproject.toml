@@ -1,7 +1,7 @@
 [project]
 name = "doc-intelligence"
-version = "2.0.0"
-description = "A fast, local file indexing tool with duplicate detection, full-text search, and real-time monitoring"
+version = "3.0.0"
+description = "A fast, local file indexing tool with duplicate detection, full-text search, visual reports, and a web dashboard"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -20,6 +20,17 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
 ]
+images = [
+    "imagehash>=4.3.0",
+    "Pillow>=10.0.0",
+]
+dashboard = [
+    "streamlit>=1.30.0",
+    "pandas>=2.0.0",
+]
+all = [
+    "doc-intelligence[images,dashboard]",
+]
 
 [project.scripts]
 doc-intelligence = "scripts.cli:main"
@@ -28,6 +39,8 @@ doc-search = "scripts.search:main"
 doc-duplicates = "scripts.find_duplicates:main"
 doc-cleanup = "scripts.cleanup:main"
 doc-watch = "scripts.watch:main"
+doc-big-files = "scripts.big_files:main"
+doc-report = "scripts.report:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
