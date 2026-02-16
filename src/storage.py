@@ -39,39 +39,48 @@ class FileDatabase:
                 modified_at TIMESTAMP,
                 content_hash VARCHAR,
                 category VARCHAR,
-                scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                content_text VARCHAR
             )
         """)
-        
+
+        # Migrate existing databases: add content_text column if missing
+        columns = {
+            row[0] for row in
+            self.conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'files'").fetchall()
+        }
+        if "content_text" not in columns:
+            self.conn.execute("ALTER TABLE files ADD COLUMN content_text VARCHAR")
+
         # Index for fast duplicate lookups
         self.conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_content_hash 
+            CREATE INDEX IF NOT EXISTS idx_content_hash
             ON files(content_hash)
         """)
-        
+
         # Index for extension-based queries
         self.conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_extension 
+            CREATE INDEX IF NOT EXISTS idx_extension
             ON files(extension)
         """)
     
     def insert_file(self, file_info: FileInfo) -> bool:
         """
         Insert or update a file record.
-        
+
         Args:
             file_info: FileInfo object to insert
-        
+
         Returns:
             True if inserted, False if error
         """
         try:
-            # Simple insert - delete first if exists
             self.conn.execute("DELETE FROM files WHERE path = ?", [file_info.path])
             self.conn.execute("""
-                INSERT INTO files 
-                (path, name, extension, size_bytes, created_at, modified_at, content_hash, category)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO files
+                (path, name, extension, size_bytes, created_at, modified_at,
+                 content_hash, category, content_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 file_info.path,
                 file_info.name,
@@ -80,28 +89,65 @@ class FileDatabase:
                 file_info.created_at,
                 file_info.modified_at,
                 file_info.content_hash,
-                file_info.category
+                file_info.category,
+                file_info.content_text
             ])
             return True
         except Exception as e:
             print(f"Error inserting {file_info.path}: {e}")
             return False
-    
+
     def insert_batch(self, files: list[FileInfo]) -> int:
         """
-        Insert multiple files efficiently.
-        
+        Insert multiple files efficiently using bulk operations.
+
+        Uses batched DELETE + single-statement multi-row INSERT for
+        significant speedup over row-by-row operations.
+
         Args:
             files: List of FileInfo objects
-        
+
         Returns:
             Number of files inserted
         """
-        count = 0
-        for file_info in files:
-            if self.insert_file(file_info):
-                count += 1
-        return count
+        if not files:
+            return 0
+
+        try:
+            batch_size = 500
+            paths = [fi.path for fi in files]
+
+            # Bulk delete existing rows for these paths
+            for i in range(0, len(paths), batch_size):
+                batch = paths[i:i + batch_size]
+                placeholders = ", ".join(["?" for _ in batch])
+                self.conn.execute(
+                    f"DELETE FROM files WHERE path IN ({placeholders})", batch
+                )
+
+            # Bulk insert using single multi-row VALUES statement
+            for i in range(0, len(files), batch_size):
+                chunk = files[i:i + batch_size]
+                row_placeholder = "(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                values_sql = ", ".join([row_placeholder] * len(chunk))
+                flat_params = []
+                for fi in chunk:
+                    flat_params.extend([
+                        fi.path, fi.name, fi.extension, fi.size_bytes,
+                        fi.created_at, fi.modified_at, fi.content_hash,
+                        fi.category, fi.content_text
+                    ])
+                self.conn.execute(
+                    f"INSERT INTO files "
+                    f"(path, name, extension, size_bytes, created_at, "
+                    f"modified_at, content_hash, category, content_text) "
+                    f"VALUES {values_sql}",
+                    flat_params
+                )
+            return len(files)
+        except Exception as e:
+            print(f"Error in batch insert: {e}")
+            return 0
     
     def get_duplicates(self) -> list[dict]:
         """
@@ -177,30 +223,38 @@ class FileDatabase:
     
     def search(self, query: str, limit: int = 50) -> list[dict]:
         """
-        Search files by name or path.
-        
+        Search files by name, path, or content text.
+
         Args:
             query: Search query (case-insensitive)
             limit: Maximum results
-        
+
         Returns:
             List of matching files
         """
+        like_param = f"%{query}%"
         result = self.conn.execute("""
-            SELECT path, name, extension, size_bytes, category
+            SELECT path, name, extension, size_bytes, category,
+                   CASE
+                       WHEN LOWER(content_text) LIKE LOWER(?) THEN 1
+                       ELSE 0
+                   END AS content_match
             FROM files
-            WHERE LOWER(name) LIKE LOWER(?) OR LOWER(path) LIKE LOWER(?)
-            ORDER BY modified_at DESC
+            WHERE LOWER(name) LIKE LOWER(?)
+               OR LOWER(path) LIKE LOWER(?)
+               OR LOWER(content_text) LIKE LOWER(?)
+            ORDER BY content_match DESC, modified_at DESC
             LIMIT ?
-        """, [f"%{query}%", f"%{query}%", limit]).fetchall()
-        
+        """, [like_param, like_param, like_param, like_param, limit]).fetchall()
+
         return [
             {
                 "path": row[0],
                 "name": row[1],
                 "extension": row[2],
                 "size_bytes": row[3],
-                "category": row[4]
+                "category": row[4],
+                "content_match": bool(row[5])
             }
             for row in result
         ]

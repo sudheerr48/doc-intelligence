@@ -1,0 +1,41 @@
+[project]
+name = "doc-intelligence"
+version = "2.0.0"
+description = "A fast, local file indexing tool with duplicate detection, full-text search, and real-time monitoring"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "duckdb>=0.10.0",
+    "xxhash>=3.4.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.66.0",
+    "pypdf>=3.0.0",
+    "watchdog>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+doc-intelligence = "scripts.cli:main"
+doc-scan = "scripts.scan:main"
+doc-search = "scripts.search:main"
+doc-duplicates = "scripts.find_duplicates:main"
+doc-cleanup = "scripts.cleanup:main"
+doc-watch = "scripts.watch:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["src*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
