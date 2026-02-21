@@ -50,3 +50,53 @@ staging:
 # Output
 reports:
   output_dir: ./data/reports
+
+# AI-powered features
+# Supported providers: anthropic (requires ANTHROPIC_API_KEY), openai (requires OPENAI_API_KEY)
+# Provider is auto-detected from available API keys, or set explicitly below.
+ai:
+  provider: auto                        # auto | anthropic | openai
+  anthropic:
+    model: claude-sonnet-4-20250514     # Default Anthropic model
+  openai:
+    model: gpt-4o                       # Default OpenAI model
+  batch_size: 20                        # Files per API call for tagging
+  max_tag_files: 500                    # Max files to tag per run
+
+# Semantic search embeddings
+# Supports: Voyage AI (VOYAGE_API_KEY) or OpenAI (OPENAI_API_KEY)
+# Provider is auto-detected from available API keys
+embeddings:
+  # model: voyage-3.5                   # Voyage AI (Anthropic partner) — default with VOYAGE_API_KEY
+  # model: text-embedding-3-small       # OpenAI — default with OPENAI_API_KEY
+  batch_size: 100                       # Texts per API call
+  max_files: 500                        # Max files to embed per run
+
+# ---------------------------------------------------------------------------
+# Swappable providers — change any component without touching code.
+# Run `doc-intelligence providers` to see all registered providers.
+# See PLUGINS.md for how to add your own.
+# ---------------------------------------------------------------------------
+providers:
+  extractor: builtin                    # builtin | unstructured | docling
+  embedding: builtin                    # builtin | sentence-transformers | ollama
+  llm: builtin                         # builtin | ollama
+  classifier: builtin                   # builtin | zero-shot
+  vectorstore: builtin                  # builtin | lancedb | chromadb
+
+  # Per-provider options (passed as kwargs to the provider constructor)
+  # extractor_options: {}
+  # embedding_options:
+  #   model: all-MiniLM-L6-v2
+  #   batch_size: 64
+  # llm_options:
+  #   provider: anthropic             # force a specific LLM backend
+  # classifier_options: {}
+  # vectorstore_options: {}
+
+# MCP Server (Model Context Protocol)
+# Exposes file index as tools for AI assistants (Claude Desktop, VS Code, etc.)
+# Start with: doc-intelligence serve
+mcp:
+  transport: stdio                      # stdio (for Claude Desktop) or http
+  port: 8765                            # Port for HTTP transport

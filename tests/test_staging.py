@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.staging import (
+from src.analysis.duplicates import (
     pick_keeper,
     stage_files,
     auto_stage_duplicates,

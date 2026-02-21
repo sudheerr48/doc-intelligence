@@ -17,8 +17,8 @@ from watchdog.events import (
     DirCreatedEvent,
 )
 
-from src.storage import FileDatabase
-from src.watcher import FileChangeHandler
+from src.core.database import FileDatabase
+from src.scanner.watcher import FileChangeHandler
 
 
 # ---------------------------------------------------------------------------

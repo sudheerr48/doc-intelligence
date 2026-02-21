@@ -15,9 +15,9 @@ import typer
 from rich.console import Console
 from watchdog.observers import Observer
 
-from src.storage import FileDatabase
-from src.watcher import FileChangeHandler
-from src.utils import load_config
+from src.core.database import FileDatabase
+from src.scanner.watcher import FileChangeHandler
+from src.core.config import load_config
 
 
 console = Console()

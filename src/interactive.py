@@ -11,11 +11,14 @@ from typing import Optional
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.columns import Columns
+from rich.text import Text
+from rich.rule import Rule
 from rich.prompt import Prompt, Confirm, IntPrompt
 
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
-from src.staging import (
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
+from src.analysis.duplicates import (
     auto_stage_duplicates,
     list_staged_files,
     confirm_delete_staged,
@@ -34,31 +37,42 @@ def _get_db(config: dict) -> Optional[FileDatabase]:
     return FileDatabase(str(db_path))
 
 
+def _metric_card(label: str, value: str, style: str = "bold green") -> Panel:
+    content = Text(value, style=style, justify="center")
+    return Panel(content, title=f"[dim]{label}[/dim]", border_style="bright_black",
+                 width=20, padding=(0, 1))
+
+
 def _print_savings(duplicates: list[dict]):
     """Print disk savings summary for duplicate groups."""
     if not duplicates:
-        console.print("[green]No duplicates found - your files are clean![/green]")
+        console.print(Panel(
+            "[bold green]No duplicates found -- your files are clean![/bold green]",
+            border_style="green",
+        ))
         return
 
     total_wasted = sum(d["wasted_size"] for d in duplicates)
     total_sets = len(duplicates)
     total_files = sum(d["count"] for d in duplicates)
 
-    console.print(Panel(
-        f"[bold]{total_sets} duplicate sets[/bold] containing "
-        f"[bold]{total_files} files[/bold]\n"
-        f"Cleaning up would free: [bold green]{format_size(total_wasted)}[/bold green]",
-        title="Disk Savings Summary",
-        border_style="green",
-    ))
+    cards = [
+        _metric_card("Duplicate Sets", str(total_sets), "bold yellow"),
+        _metric_card("Duplicate Files", f"{total_files:,}", "bold yellow"),
+        _metric_card("Reclaimable", format_size(total_wasted), "bold red"),
+    ]
+    console.print(Columns(cards, equal=True, expand=True))
+    console.print()
 
 
 def run_interactive(config_path: Optional[str] = None):
     """Run the interactive wizard."""
+    console.print()
     console.print(Panel(
-        "[bold]Doc Intelligence[/bold] - Interactive Mode\n"
-        "Walk through scanning, finding duplicates, and cleaning up.",
+        "[bold white]Doc Intelligence[/bold white] [dim]v4.0[/dim]\n"
+        "[dim]AI-powered file intelligence -- scan, deduplicate, tag, and search.[/dim]",
         border_style="blue",
+        padding=(1, 3),
     ))
 
     config = load_config(config_path)
@@ -69,25 +83,45 @@ def run_interactive(config_path: Optional[str] = None):
 
     if has_data:
         stats = db.get_stats()
-        console.print(f"\nDatabase has [bold]{stats['total_files']:,}[/bold] files "
-                      f"([bold]{format_size(stats['total_size_bytes'])}[/bold]).\n")
+        console.print()
+        cards = [
+            _metric_card("Files Indexed", f"{stats['total_files']:,}", "bold green"),
+            _metric_card("Total Size", format_size(stats['total_size_bytes']), "bold cyan"),
+            _metric_card("Duplicate Sets", f"{stats['duplicate_sets']:,}", "bold yellow" if stats['duplicate_sets'] else "bold green"),
+        ]
+        console.print(Columns(cards, equal=True, expand=True))
+        console.print()
+
+        console.print(Rule("[bold]What would you like to do?[/bold]", style="bright_black"))
+        console.print("  [bold cyan]scan[/bold cyan]        Re-scan folders and update the index")
+        console.print("  [bold cyan]duplicates[/bold cyan]  Find and manage duplicate files")
+        console.print("  [bold cyan]search[/bold cyan]      Search files by name or content")
+        console.print("  [bold cyan]big-files[/bold cyan]   Find the largest files")
+        console.print("  [bold cyan]report[/bold cyan]      Generate an HTML report")
+        console.print("  [bold cyan]stats[/bold cyan]       View detailed statistics")
+        console.print("  [bold cyan]quit[/bold cyan]        Exit")
+        console.print()
+
         action = Prompt.ask(
-            "What would you like to do?",
+            "[bold]Choose action[/bold]",
             choices=["scan", "duplicates", "search", "big-files", "report", "stats", "quit"],
             default="duplicates",
         )
     else:
         if db:
             db.close()
-        console.print("\n[yellow]No files indexed yet.[/yellow]")
-        console.print("Let's scan your folders first.\n")
+        console.print()
+        console.print(Panel(
+            "[bold yellow]No files indexed yet.[/bold yellow]\n\n"
+            "Let's scan your folders to get started.",
+            border_style="yellow",
+        ))
         action = "scan"
 
     # Dispatch to the chosen action
     if action == "scan":
         _interactive_scan(config, config_path)
-        # After scan, offer to check duplicates
-        if Confirm.ask("\nWould you like to check for duplicates now?", default=True):
+        if Confirm.ask("\nCheck for duplicates now?", default=True):
             _interactive_duplicates(config)
     elif action == "duplicates":
         _interactive_duplicates(config)
@@ -100,14 +134,14 @@ def run_interactive(config_path: Optional[str] = None):
     elif action == "stats":
         _interactive_stats(config)
     elif action == "quit":
-        console.print("[dim]Goodbye![/dim]")
+        console.print("\n[dim]Goodbye![/dim]\n")
         return
 
     if db:
         db.close()
 
     # Offer to continue
-    if Confirm.ask("\nWould you like to do something else?", default=False):
+    if Confirm.ask("\nDo something else?", default=False):
         run_interactive(config_path)
 
 
@@ -116,20 +150,26 @@ def _interactive_scan(config: dict, config_path: Optional[str] = None):
     from scripts.scan import run_scan
 
     folders = config.get("scan_folders", [])
-    console.print("\n[bold]Configured scan folders:[/bold]")
+    console.print()
+    console.print(Rule("[bold]Scan Folders[/bold]", style="bright_black"))
+
     for i, f in enumerate(folders, 1):
         p = Path(f["path"]).expanduser()
-        exists = "[green]exists[/green]" if p.exists() else "[red]missing[/red]"
-        console.print(f"  {i}. {p} ({f.get('category', 'unknown')}) - {exists}")
+        if p.exists():
+            status = "[green]ready[/green]"
+        else:
+            status = "[red]missing[/red]"
+        console.print(f"  [dim]{i}.[/dim] [cyan]{p}[/cyan] ({f.get('category', 'unknown')}) {status}")
 
+    console.print()
     scan_choice = Prompt.ask(
-        "\nScan all configured folders or a custom path?",
+        "Scan all configured folders or a custom path?",
         choices=["all", "custom"],
         default="all",
     )
 
     if scan_choice == "custom":
-        custom_path = Prompt.ask("Enter directory path to scan")
+        custom_path = Prompt.ask("Enter directory path")
         category = Prompt.ask("Category label", default="custom")
         run_scan(config_path=config_path, path=custom_path, category=category)
     else:
@@ -144,6 +184,7 @@ def _interactive_duplicates(config: dict):
         return
 
     duplicates = db.get_duplicates()
+    console.print()
     _print_savings(duplicates)
 
     if not duplicates:
@@ -152,20 +193,21 @@ def _interactive_duplicates(config: dict):
 
     # Show top duplicates
     limit = min(10, len(duplicates))
-    console.print(f"\n[bold]Top {limit} duplicate sets by wasted space:[/bold]\n")
+    console.print(Rule(f"[bold]Top {limit} Duplicate Sets[/bold]", style="bright_black"))
+    console.print()
 
-    table = Table()
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Copies", style="cyan", width=6)
-    table.add_column("Size Each", style="green", width=12)
-    table.add_column("Wasted", style="red", width=12)
+    table = Table(border_style="bright_black", show_lines=True, pad_edge=False)
+    table.add_column("#", style="dim", width=4, justify="right")
+    table.add_column("Copies", style="bold cyan", width=7, justify="center")
+    table.add_column("Each", style="green", width=12, justify="right")
+    table.add_column("Wasted", style="bold red", width=12, justify="right")
     table.add_column("Files", style="white")
 
     for i, dup in enumerate(duplicates[:limit], 1):
         size_each = dup["total_size"] // dup["count"]
         paths = dup["paths"]
         if len(paths) > 2:
-            paths_display = "\n".join(paths[:2]) + f"\n... and {len(paths) - 2} more"
+            paths_display = "\n".join(paths[:2]) + f"\n[dim]+ {len(paths) - 2} more[/dim]"
         else:
             paths_display = "\n".join(paths)
         table.add_row(
@@ -175,28 +217,34 @@ def _interactive_duplicates(config: dict):
         )
 
     console.print(table)
+    console.print()
 
     # Ask what to do
     action = Prompt.ask(
-        "\nWhat would you like to do with duplicates?",
+        "[bold]Action[/bold]",
         choices=["stage", "preview", "export", "skip"],
         default="preview",
     )
 
     if action == "preview":
-        # Dry run
         staging_root = str(
             Path(config["database"]["path"]).expanduser().parent / STAGING_FOLDER
         )
         result = auto_stage_duplicates(duplicates, staging_root, strategy="newest", dry_run=True)
-        console.print(f"\n[bold]Preview:[/bold] Would stage {len(result['staged'])} files "
-                      f"(freeing {format_size(result['total_bytes_freed'])})")
-        console.print(f"Would keep {len(result['kept'])} files (newest copy of each)")
+        console.print(Panel(
+            f"Would stage [bold]{len(result['staged'])}[/bold] files "
+            f"(freeing [bold green]{format_size(result['total_bytes_freed'])}[/bold green])\n"
+            f"Would keep [bold]{len(result['kept'])}[/bold] files (newest copy of each)",
+            border_style="cyan", title="Preview",
+        ))
 
-        if Confirm.ask("\nProceed with staging these files?", default=False):
+        if Confirm.ask("\nProceed with staging?", default=False):
             result = auto_stage_duplicates(duplicates, staging_root, strategy="newest", dry_run=False)
-            console.print(f"[green]Staged {len(result['staged'])} files to {staging_root}[/green]")
-            console.print("[dim]Run 'doc-intelligence cleanup' to review and confirm deletion.[/dim]")
+            console.print(Panel(
+                f"[bold green]Staged {len(result['staged'])} files[/bold green]\n"
+                f"Run [bold cyan]doc-intelligence cleanup[/bold cyan] to review and confirm.",
+                border_style="green",
+            ))
 
     elif action == "stage":
         strategy = Prompt.ask("Keep which copy?", choices=["newest", "shortest"], default="newest")
@@ -204,8 +252,11 @@ def _interactive_duplicates(config: dict):
             Path(config["database"]["path"]).expanduser().parent / STAGING_FOLDER
         )
         result = auto_stage_duplicates(duplicates, staging_root, strategy=strategy, dry_run=False)
-        console.print(f"\n[green]Staged {len(result['staged'])} files[/green]")
-        console.print(f"Space to free: [bold green]{format_size(result['total_bytes_freed'])}[/bold green]")
+        console.print(Panel(
+            f"[bold green]Staged {len(result['staged'])} files[/bold green]\n"
+            f"Space to free: [bold]{format_size(result['total_bytes_freed'])}[/bold]",
+            border_style="green",
+        ))
 
         if Confirm.ask("\nReview staged files now?", default=True):
             _interactive_cleanup(config)
@@ -222,7 +273,7 @@ def _interactive_duplicates(config: dict):
                     dup["hash"], dup["count"], size_each,
                     dup["wasted_size"], "|".join(dup["paths"]),
                 ])
-        console.print(f"[green]Exported to {export_path}[/green]")
+        console.print(Panel(f"[bold green]Exported to {export_path}[/bold green]", border_style="green"))
 
     db.close()
 
@@ -235,14 +286,17 @@ def _interactive_cleanup(config: dict):
     staged = list_staged_files(staging_root)
 
     if not staged:
-        console.print("[green]No files staged for deletion.[/green]")
+        console.print(Panel("[bold green]No files staged for deletion.[/bold green]", border_style="green"))
         return
 
     total_size = sum(f["size_bytes"] for f in staged)
-    console.print(f"\n[bold]{len(staged)} files staged[/bold] ({format_size(total_size)})")
+    console.print(Panel(
+        f"[bold]{len(staged)}[/bold] files staged ({format_size(total_size)})",
+        border_style="yellow", title="Staged for Deletion",
+    ))
 
     action = Prompt.ask(
-        "What would you like to do?",
+        "[bold]Action[/bold]",
         choices=["delete", "restore", "skip"],
         default="skip",
     )
@@ -253,18 +307,24 @@ def _interactive_cleanup(config: dict):
             default=False,
         ):
             result = confirm_delete_staged(staging_root)
-            console.print(f"[green]Deleted {result['deleted_count']} files, "
-                          f"freed {format_size(result['deleted_bytes'])}[/green]")
+            console.print(Panel(
+                f"[bold green]Deleted {result['deleted_count']} files[/bold green]\n"
+                f"Freed {format_size(result['deleted_bytes'])}",
+                border_style="green",
+            ))
     elif action == "restore":
         result = restore_staged_files(staging_root)
-        console.print(f"[green]Restored {result['restored_count']} files.[/green]")
+        console.print(Panel(
+            f"[bold green]Restored {result['restored_count']} files.[/bold green]",
+            border_style="green",
+        ))
 
 
 def _interactive_search(config: dict):
     """Interactive search flow."""
     from scripts.search import run_search
 
-    query = Prompt.ask("Search query")
+    query = Prompt.ask("[bold]Search query[/bold]")
     ext = Prompt.ask("Filter by extension (leave blank for all)", default="")
     run_search(query=query, extension=ext if ext else None)
 
@@ -283,8 +343,11 @@ def _interactive_report(config: dict):
 
     output = Prompt.ask("Output file path", default="doc_intelligence_report.html")
     run_report(config=config, output_path=output)
-    console.print(f"\n[green]Report saved to {output}[/green]")
-    console.print("[dim]Open it in your browser to explore.[/dim]")
+    console.print(Panel(
+        f"[bold green]Report saved to {output}[/bold green]\n"
+        "[dim]Open it in your browser to explore.[/dim]",
+        border_style="green",
+    ))
 
 
 def _interactive_stats(config: dict):
@@ -296,20 +359,22 @@ def _interactive_stats(config: dict):
 
     stats = db.get_stats()
 
-    table = Table(title="Database Overview")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
-    table.add_row("Total Files", f"{stats['total_files']:,}")
-    table.add_row("Total Size", format_size(stats['total_size_bytes']))
-    table.add_row("Duplicate Sets", f"{stats['duplicate_sets']:,}")
-    console.print(table)
+    console.print()
+    cards = [
+        _metric_card("Total Files", f"{stats['total_files']:,}", "bold green"),
+        _metric_card("Total Size", format_size(stats['total_size_bytes']), "bold cyan"),
+        _metric_card("Duplicate Sets", f"{stats['duplicate_sets']:,}", "bold yellow" if stats['duplicate_sets'] else "bold green"),
+    ]
+    console.print(Columns(cards, equal=True, expand=True))
+    console.print()
 
     if stats["by_category"]:
-        cat_table = Table(title="By Category")
-        cat_table.add_column("Category", style="cyan")
-        cat_table.add_column("Files", style="green")
+        console.print(Rule("[bold]By Category[/bold]", style="bright_black"))
+        max_val = max(stats["by_category"].values()) or 1
         for cat_name, count in sorted(stats["by_category"].items()):
-            cat_table.add_row(cat_name, f"{count:,}")
-        console.print(cat_table)
+            bar_len = int((count / max_val) * 30)
+            bar = "[cyan]" + "\u2501" * bar_len + "[/cyan]"
+            console.print(f"  {cat_name:<20} {bar} [dim]{count:,}[/dim]")
+        console.print()
 
     db.close()

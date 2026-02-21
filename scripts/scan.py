@@ -16,15 +16,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
+from rich.columns import Columns
+from rich.text import Text
+from rich.rule import Rule
 
-from src.scanner import scan_folder_incremental, NUM_WORKERS, _collect_files_with_stats
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
+from src.scanner.engine import scan_folder_incremental, NUM_WORKERS, _collect_files_with_stats
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
 
 
 console = Console()
 
 app = typer.Typer(help="Scan folders and build the file index.")
+
+
+def _metric_card(label: str, value: str, style: str = "bold green") -> Panel:
+    content = Text(value, style=style, justify="center")
+    return Panel(content, title=f"[dim]{label}[/dim]", border_style="bright_black",
+                 width=20, padding=(0, 1))
 
 
 def run_scan(
@@ -36,15 +46,20 @@ def run_scan(
     """Core scan logic used by both Typer CLI and legacy main()."""
     start_time = time.time()
 
-    console.print("\n[bold blue]📁 Doc Intelligence v1.0 - Incremental Scanner[/bold blue]")
-    console.print(f"[bold cyan]⚡ Parallel Mode: {NUM_WORKERS} workers | Incremental: Yes[/bold cyan]\n")
+    console.print()
+    console.print(Panel(
+        "[bold white]Doc Intelligence[/bold white] [dim]v4.0[/dim]  [bold cyan]Scanner[/bold cyan]\n"
+        f"[dim]{NUM_WORKERS} workers | Incremental mode[/dim]",
+        border_style="blue",
+        padding=(0, 2),
+    ))
+    console.print()
 
     # Load config
     config = load_config(config_path)
 
     # Initialize database
     db_path = Path(config["database"]["path"]).expanduser()
-    console.print(f"[dim]Database: {db_path}[/dim]")
 
     db = FileDatabase(str(db_path))
 
@@ -54,8 +69,8 @@ def run_scan(
     min_size = config.get("deduplication", {}).get("min_size_bytes", 1024)
     hash_algo = algorithm or config.get("deduplication", {}).get("hash_algorithm", "xxhash")
 
-    console.print(f"[dim]Hash algorithm: {hash_algo}[/dim]")
-    console.print(f"[dim]Min file size: {format_size(min_size)}[/dim]")
+    console.print(f"  [dim]Database:[/dim]  {db_path}")
+    console.print(f"  [dim]Algorithm:[/dim] {hash_algo}  [dim]Min size:[/dim] {format_size(min_size)}")
     console.print()
 
     total_new = 0
@@ -75,10 +90,10 @@ def run_scan(
         cat = folder_config.get("category", "unknown")
 
         if not folder_path.exists():
-            console.print(f"[yellow]⚠️  Skipping (not found): {folder_path}[/yellow]")
+            console.print(f"  [yellow]Skipping (not found):[/yellow] {folder_path}")
             continue
 
-        console.print(f"[bold]📂 {folder_path}[/bold]")
+        console.print(Rule(f"[bold]{folder_path}[/bold]  [dim]({cat})[/dim]", style="bright_black"))
 
         folder_start = time.time()
 
@@ -122,12 +137,13 @@ def run_scan(
         new_size = sum(f.size_bytes for f in result.new_files)
 
         if result.new_files or result.removed_count:
-            console.print(f"   [green]✓ New/Modified: {len(result.new_files):,} ({format_size(new_size)})[/green]")
-            console.print(f"   [dim]  Unchanged: {result.unchanged_count:,} | Removed: {result.removed_count:,}[/dim]")
+            console.print(f"  [green]+{len(result.new_files):,} new/modified[/green] ({format_size(new_size)})  "
+                          f"[dim]{result.unchanged_count:,} cached  {result.removed_count:,} removed[/dim]  "
+                          f"[dim]{folder_time:.1f}s[/dim]")
         else:
-            console.print(f"   [dim]✓ No changes ({result.unchanged_count:,} files cached)[/dim]")
+            console.print(f"  [dim]No changes ({result.unchanged_count:,} files cached) {folder_time:.1f}s[/dim]")
 
-        console.print(f"   [dim]  Time: {folder_time:.1f}s[/dim]\n")
+        console.print()
 
         total_new += len(result.new_files)
         total_unchanged += result.unchanged_count
@@ -137,32 +153,36 @@ def run_scan(
     elapsed = time.time() - start_time
 
     # Show summary
-    console.print("[bold green]✅ Scan Complete![/bold green]\n")
+    db_stats = db.get_stats()
 
-    stats = db.get_stats()
+    console.print(Panel("[bold green]Scan Complete[/bold green]", border_style="green"))
+    console.print()
 
-    table = Table(title="Summary")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
+    cards = [
+        _metric_card("New/Modified", f"{total_new:,}", "bold green"),
+        _metric_card("Cached", f"{total_unchanged:,}", "dim"),
+        _metric_card("Total in DB", f"{db_stats['total_files']:,}", "bold cyan"),
+        _metric_card("Duplicates", f"{db_stats['duplicate_sets']:,}", "bold yellow" if db_stats['duplicate_sets'] else "bold green"),
+    ]
+    console.print(Columns(cards, equal=True, expand=True))
 
-    table.add_row("New/Modified", f"{total_new:,} files")
-    table.add_row("Unchanged (cached)", f"{total_unchanged:,} files")
-    table.add_row("Removed", f"{total_removed:,} files")
-    table.add_row("Total in DB", f"{stats['total_files']:,} files")
-    table.add_row("Total Size", format_size(stats['total_size_bytes']))
-    table.add_row("Duplicate Sets", f"{stats['duplicate_sets']:,}")
-    table.add_row("Total Time", f"{elapsed:.1f}s")
-
-    console.print(table)
+    console.print()
+    console.print(f"  [dim]Total size:[/dim] {format_size(db_stats['total_size_bytes'])}  "
+                  f"[dim]Time:[/dim] {elapsed:.1f}s  "
+                  f"[dim]Database:[/dim] {db_path}")
 
     # Show by category
-    if stats["by_category"]:
-        console.print("\n[bold]By Category:[/bold]")
-        for cat_name, count in stats["by_category"].items():
-            console.print(f"  {cat_name}: {count:,} files")
+    if db_stats["by_category"]:
+        console.print()
+        console.print(Rule("[bold]By Category[/bold]", style="bright_black"))
+        max_val = max(db_stats["by_category"].values()) or 1
+        for cat_name, count in db_stats["by_category"].items():
+            bar_len = int((count / max_val) * 30)
+            bar = "[cyan]" + "\u2501" * bar_len + "[/cyan]"
+            console.print(f"  {cat_name:<20} {bar} [dim]{count:,}[/dim]")
 
-    console.print(f"\n[dim]Database: {db_path}[/dim]")
-    console.print("[dim]Run 'doc-intelligence duplicates' to see duplicates[/dim]\n")
+    console.print()
+    console.print("[dim]Next: doc-intelligence duplicates | doc-intelligence stats | doc-intelligence health[/dim]\n")
 
     db.close()
 

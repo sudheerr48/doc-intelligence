@@ -9,7 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from src.scanner import (
+from src.scanner.engine import (
     compute_hash,
     should_skip,
     _collect_files_with_stats,

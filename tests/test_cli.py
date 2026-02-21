@@ -11,8 +11,8 @@ from datetime import datetime
 import pytest
 from typer.testing import CliRunner
 
-from src.scanner import FileInfo
-from src.storage import FileDatabase
+from src.core.models import FileInfo
+from src.core.database import FileDatabase
 
 
 runner = CliRunner()

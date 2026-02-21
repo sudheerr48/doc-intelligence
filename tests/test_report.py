@@ -4,8 +4,8 @@ import pytest
 from pathlib import Path
 from datetime import datetime
 
-from src.storage import FileDatabase
-from src.scanner import FileInfo
+from src.core.database import FileDatabase
+from src.core.models import FileInfo
 
 
 @pytest.fixture

@@ -14,13 +14,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from src.staging import (
+from src.analysis.duplicates import (
     list_staged_files,
     confirm_delete_staged,
     restore_staged_files,
     STAGING_FOLDER,
 )
-from src.utils import load_config, format_size
+from src.core.config import load_config, format_size
 
 
 console = Console()
