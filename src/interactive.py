@@ -16,9 +16,9 @@ from rich.text import Text
 from rich.rule import Rule
 from rich.prompt import Prompt, Confirm, IntPrompt
 
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
-from src.staging import (
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
+from src.analysis.duplicates import (
     auto_stage_duplicates,
     list_staged_files,
     confirm_delete_staged,

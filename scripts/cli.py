@@ -50,8 +50,8 @@ from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn
 from rich.rule import Rule
 
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
 
 console = Console()
 
@@ -330,7 +330,7 @@ def similar_images(
         return
 
     try:
-        from src.image_dedup import find_similar_images_from_db
+        from src.analysis.image_dedup import find_similar_images_from_db
     except ImportError:
         console.print("[red]Image dedup requires: pip install 'doc-intelligence\\[images]'[/red]")
         db.close()
@@ -630,7 +630,7 @@ def health(
         return
     metrics = db.get_health_metrics()
 
-    from src.health import compute_health_score, generate_health_text
+    from src.analysis.health import compute_health_score, generate_health_text
 
     health_data = compute_health_score(metrics)
 
@@ -850,7 +850,7 @@ def embed(
 
     _header("Embedding Generation")
 
-    from src.ai import _detect_embedding_provider, DEFAULT_EMBEDDING_MODELS
+    from src.ai.providers import _detect_embedding_provider, DEFAULT_EMBEDDING_MODELS
     try:
         emb_provider = _detect_embedding_provider()
     except RuntimeError:
@@ -1015,7 +1015,7 @@ def serve(
 ):
     """Start the MCP server for AI assistants (Claude Desktop, VS Code, etc.)."""
     try:
-        from src.mcp_server import run_mcp_server
+        from src.mcp.server import run_mcp_server
     except ImportError:
         console.print(Panel(
             "[bold red]MCP server requires the 'mcp' package[/bold red]\n\n"

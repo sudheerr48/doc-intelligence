@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 
-from src.image_dedup import (
+from src.analysis.image_dedup import (
     is_image,
     hamming_distance,
     IMAGE_EXTENSIONS,
@@ -79,14 +79,14 @@ class TestImageExtensions:
 class TestFindSimilarImages:
     def test_empty_list(self):
         """Empty input returns empty output."""
-        from src.image_dedup import find_similar_images
+        from src.analysis.image_dedup import find_similar_images
 
         result = find_similar_images([])
         assert result == []
 
     def test_nonexistent_files(self):
         """Nonexistent files are skipped gracefully."""
-        from src.image_dedup import find_similar_images
+        from src.analysis.image_dedup import find_similar_images
 
         result = find_similar_images(["/nonexistent/a.jpg", "/nonexistent/b.jpg"])
         assert result == []
@@ -105,7 +105,7 @@ class TestFindSimilarImages:
         img.save(path1)
         img.save(path2)
 
-        from src.image_dedup import find_similar_images
+        from src.analysis.image_dedup import find_similar_images
 
         result = find_similar_images([path1, path2], threshold=10)
         assert len(result) == 1
@@ -127,7 +127,7 @@ class TestFindSimilarImages:
         img1.save(path1)
         img2.save(path2)
 
-        from src.image_dedup import find_similar_images
+        from src.analysis.image_dedup import find_similar_images
 
         # With strict threshold, solid colors may still match depending on the hash
         # Use threshold=0 for exact match only

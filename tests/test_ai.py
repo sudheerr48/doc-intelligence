@@ -1,5 +1,5 @@
 """
-Tests for the AI module (src/ai.py).
+Tests for the AI module.
 Tests parsing logic directly. API calls are mocked.
 """
 
@@ -9,8 +9,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-# Import parsing helpers directly
-from src.ai import _parse_tags, _parse_batch_tags, is_ai_available
+from src.ai.classification import _parse_tags, _parse_batch_tags
+from src.ai.providers import is_ai_available
 
 
 # ---------------------------------------------------------------------------
@@ -94,14 +94,12 @@ class TestIsAiAvailable:
     def test_with_anthropic_key(self):
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
             result = is_ai_available()
-            # True if anthropic package is installed, otherwise False
             assert isinstance(result, bool)
 
     def test_with_openai_key(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             result = is_ai_available()
-            # True if openai package is installed, otherwise False
             assert isinstance(result, bool)
 
 
@@ -111,29 +109,28 @@ class TestIsAiAvailable:
 
 class TestProviderDetection:
     def setup_method(self):
-        """Reset global state before each test."""
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
     def test_detect_anthropic(self):
-        from src.ai import _detect_provider
+        from src.ai.providers import _detect_provider
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
             assert _detect_provider() == "anthropic"
 
     def test_detect_openai(self):
-        from src.ai import _detect_provider
+        from src.ai.providers import _detect_provider
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             assert _detect_provider() == "openai"
 
     def test_anthropic_takes_priority(self):
-        from src.ai import _detect_provider
+        from src.ai.providers import _detect_provider
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant", "OPENAI_API_KEY": "sk-oai"}, clear=True):
             assert _detect_provider() == "anthropic"
 
     def test_no_key_raises(self):
-        from src.ai import _detect_provider
+        from src.ai.providers import _detect_provider
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             os.environ.pop("OPENAI_API_KEY", None)
@@ -141,26 +138,26 @@ class TestProviderDetection:
                 _detect_provider()
 
     def test_set_provider_valid(self):
-        from src.ai import set_provider, get_provider
+        from src.ai.providers import set_provider, get_provider
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
             set_provider("openai")
             assert get_provider() == "openai"
 
     def test_set_provider_invalid(self):
-        from src.ai import set_provider
+        from src.ai.providers import set_provider
         with pytest.raises(ValueError, match="Unknown provider"):
             set_provider("invalid")
 
     def test_default_model_anthropic(self):
-        from src.ai import _default_model, set_provider, DEFAULT_MODELS
+        from src.ai.providers import default_model, set_provider, DEFAULT_MODELS
         set_provider("anthropic")
-        assert _default_model() == DEFAULT_MODELS["anthropic"]
-        assert _default_model("custom-model") == "custom-model"
+        assert default_model() == DEFAULT_MODELS["anthropic"]
+        assert default_model("custom-model") == "custom-model"
 
     def test_default_model_openai(self):
-        from src.ai import _default_model, set_provider, DEFAULT_MODELS
+        from src.ai.providers import default_model, set_provider, DEFAULT_MODELS
         set_provider("openai")
-        assert _default_model() == DEFAULT_MODELS["openai"]
+        assert default_model() == DEFAULT_MODELS["openai"]
 
 
 # ---------------------------------------------------------------------------
@@ -169,18 +166,17 @@ class TestProviderDetection:
 
 class TestClassifyFile:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.classification.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.classification.chat")
     def test_classify_returns_tags_fallback(self, mock_chat, mock_tool):
-        """Test fallback path when tool_use is unavailable."""
         mock_chat.return_value = '["python-script", "development"]'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import classify_file
+            from src.ai.classification import classify_file
             tags = classify_file(
                 name="app.py",
                 extension=".py",
@@ -190,13 +186,13 @@ class TestClassifyFile:
         assert tags == ["python-script", "development"]
         mock_chat.assert_called_once()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.classification.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.classification.chat")
     def test_classify_with_content_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '["tax-return", "finance", "pdf-document"]'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import classify_file
+            from src.ai.classification import classify_file
             tags = classify_file(
                 name="2024_taxes.pdf",
                 extension=".pdf",
@@ -214,17 +210,17 @@ class TestClassifyFile:
 
 class TestClassifyBatch:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.classification.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.classification.chat")
     def test_batch_classify_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '{"1": ["python-script", "dev"], "2": ["photo", "media"]}'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import classify_batch
+            from src.ai.classification import classify_batch
             files = [
                 {"path": "/a/app.py", "name": "app.py", "extension": ".py",
                  "size_bytes": 1000, "content_text": None},
@@ -242,29 +238,29 @@ class TestClassifyBatch:
 
 class TestNlToSql:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.query.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.query.chat")
     def test_nl_to_sql_simple_fallback(self, mock_chat, mock_tool):
         expected_sql = "SELECT name, size_bytes FROM files WHERE extension = '.pdf' ORDER BY size_bytes DESC LIMIT 100"
         mock_chat.return_value = expected_sql
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import nl_to_sql
+            from src.ai.query import nl_to_sql
             sql = nl_to_sql("show me the largest PDF files")
         assert "SELECT" in sql
         assert ".pdf" in sql.lower() or "pdf" in sql.lower()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.query.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.query.chat")
     def test_nl_to_sql_strips_code_fences_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = "```sql\nSELECT * FROM files LIMIT 10\n```"
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import nl_to_sql
+            from src.ai.query import nl_to_sql
             sql = nl_to_sql("show all files")
         assert not sql.startswith("```")
         assert "SELECT" in sql
@@ -276,12 +272,12 @@ class TestNlToSql:
 
 class TestGenerateHealthInsights:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.insights.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.insights.chat")
     def test_generate_insights_fallback(self, mock_chat, mock_tool):
         insight = {
             "score": 72,
@@ -293,7 +289,7 @@ class TestGenerateHealthInsights:
         mock_chat.return_value = json.dumps(insight)
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
-            from src.ai import generate_health_insights
+            from src.ai.insights import generate_health_insights
             result = generate_health_insights({"total_files": 1000})
         assert result["score"] == 72
         assert result["grade"] == "C"
@@ -306,16 +302,17 @@ class TestGenerateHealthInsights:
 
 class TestOpenAIProvider:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.classification.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.classification.chat")
     def test_classify_with_openai_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '["spreadsheet", "finance", "quarterly-report"]'
 
-        from src.ai import set_provider, classify_file
+        from src.ai.providers import set_provider
+        from src.ai.classification import classify_file
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             set_provider("openai")
             tags = classify_file(
@@ -328,13 +325,14 @@ class TestOpenAIProvider:
         assert "spreadsheet" in tags
         mock_chat.assert_called_once()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
-    @patch("src.ai._chat")
+    @patch("src.ai.query.chat_with_tool", side_effect=Exception("no real API"))
+    @patch("src.ai.query.chat")
     def test_nl_query_with_openai_fallback(self, mock_chat, mock_tool):
         expected_sql = "SELECT name, size_bytes FROM files ORDER BY size_bytes DESC LIMIT 10"
         mock_chat.return_value = expected_sql
 
-        from src.ai import set_provider, nl_to_sql
+        from src.ai.providers import set_provider
+        from src.ai.query import nl_to_sql
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             set_provider("openai")
             sql = nl_to_sql("top 10 largest files")

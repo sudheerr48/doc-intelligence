@@ -12,8 +12,8 @@ import pytest
 from typer.testing import CliRunner
 
 from scripts.cli import app
-from src.storage import FileDatabase
-from src.scanner import FileInfo
+from src.core.database import FileDatabase
+from src.core.models import FileInfo
 
 
 runner = CliRunner()

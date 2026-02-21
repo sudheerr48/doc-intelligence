@@ -1,6 +1,6 @@
 """
-Tests for structured output via tool_use / function calling in src/ai.py.
-Tests the _chat_with_tool function and its integration with classify/nl_to_sql/health.
+Tests for structured output via tool_use / function calling in src/ai.
+Tests the chat_with_tool function and its integration with classify/nl_to_sql/health.
 """
 
 import json
@@ -11,16 +11,16 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# _chat_with_tool tests
+# chat_with_tool tests
 # ---------------------------------------------------------------------------
 
 class TestChatWithTool:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._get_client")
+    @patch("src.ai.providers._get_client")
     def test_anthropic_tool_use(self, mock_get_client):
         """Test that Anthropic provider uses tool_use correctly."""
         mock_client = MagicMock()
@@ -32,10 +32,10 @@ class TestChatWithTool:
         mock_client.messages.create.return_value = mock_response
         mock_get_client.return_value = mock_client
 
-        from src.ai import _chat_with_tool, set_provider
+        from src.ai.providers import chat_with_tool, set_provider
         set_provider("anthropic")
 
-        result = _chat_with_tool(
+        result = chat_with_tool(
             system="You are a classifier",
             user_msg="Classify this file",
             model="claude-sonnet-4-20250514",
@@ -58,7 +58,7 @@ class TestChatWithTool:
         assert len(call_kwargs["tools"]) == 1
         assert call_kwargs["tools"][0]["name"] == "classify_file"
 
-    @patch("src.ai._get_client")
+    @patch("src.ai.providers._get_client")
     def test_openai_function_calling(self, mock_get_client):
         """Test that OpenAI provider uses function calling correctly."""
         mock_client = MagicMock()
@@ -71,10 +71,10 @@ class TestChatWithTool:
         mock_client.chat.completions.create.return_value = mock_response
         mock_get_client.return_value = mock_client
 
-        from src.ai import _chat_with_tool, set_provider
+        from src.ai.providers import chat_with_tool, set_provider
         set_provider("openai")
 
-        result = _chat_with_tool(
+        result = chat_with_tool(
             system="You are a SQL generator",
             user_msg="show all files",
             model="gpt-4o",
@@ -100,13 +100,13 @@ class TestChatWithTool:
 
 class TestClassifyFileStructured:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool")
+    @patch("src.ai.classification.chat_with_tool")
     def test_uses_tool_use_primary(self, mock_tool):
-        """classify_file should use _chat_with_tool as primary path."""
+        """classify_file should use chat_with_tool as primary path."""
         mock_tool.return_value = {"tags": ["python-script", "development", "source-code"]}
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -118,10 +118,10 @@ class TestClassifyFileStructured:
         assert tags == ["python-script", "development", "source-code"]
         mock_tool.assert_called_once()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("tool_use failed"))
-    @patch("src.ai._chat")
+    @patch("src.ai.classification.chat_with_tool", side_effect=Exception("tool_use failed"))
+    @patch("src.ai.classification.chat")
     def test_falls_back_to_plain_chat(self, mock_chat, mock_tool):
-        """classify_file should fall back to _chat if tool_use fails."""
+        """classify_file should fall back to chat if tool_use fails."""
         mock_chat.return_value = '["fallback-tag", "development"]'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -134,7 +134,7 @@ class TestClassifyFileStructured:
         mock_tool.assert_called_once()
         mock_chat.assert_called_once()
 
-    @patch("src.ai._chat_with_tool")
+    @patch("src.ai.classification.chat_with_tool")
     def test_lowercases_and_limits_tags(self, mock_tool):
         mock_tool.return_value = {"tags": ["UPPER", "Mixed", "a", "b", "c", "d", "e"]}
 
@@ -154,11 +154,11 @@ class TestClassifyFileStructured:
 
 class TestClassifyBatchStructured:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool")
+    @patch("src.ai.classification.chat_with_tool")
     def test_uses_tool_use(self, mock_tool):
         mock_tool.return_value = {
             "classifications": {
@@ -189,11 +189,11 @@ class TestClassifyBatchStructured:
 
 class TestNlToSqlStructured:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool")
+    @patch("src.ai.query.chat_with_tool")
     def test_uses_tool_use(self, mock_tool):
         expected = "SELECT name, size_bytes FROM files WHERE extension = '.pdf' ORDER BY size_bytes DESC LIMIT 100"
         mock_tool.return_value = {"sql": expected}
@@ -205,8 +205,8 @@ class TestNlToSqlStructured:
         assert sql == expected
         mock_tool.assert_called_once()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("fail"))
-    @patch("src.ai._chat")
+    @patch("src.ai.query.chat_with_tool", side_effect=Exception("fail"))
+    @patch("src.ai.query.chat")
     def test_falls_back_to_plain_chat(self, mock_chat, mock_tool):
         expected = "SELECT * FROM files LIMIT 10"
         mock_chat.return_value = expected
@@ -224,11 +224,11 @@ class TestNlToSqlStructured:
 
 class TestHealthInsightsStructured:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
 
-    @patch("src.ai._chat_with_tool")
+    @patch("src.ai.insights.chat_with_tool")
     def test_uses_tool_use(self, mock_tool):
         expected = {
             "score": 85,
@@ -247,8 +247,8 @@ class TestHealthInsightsStructured:
         assert result["grade"] == "B"
         mock_tool.assert_called_once()
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("fail"))
-    @patch("src.ai._chat")
+    @patch("src.ai.insights.chat_with_tool", side_effect=Exception("fail"))
+    @patch("src.ai.insights.chat")
     def test_fallback_with_valid_json(self, mock_chat, mock_tool):
         expected = {
             "score": 72,
@@ -265,8 +265,8 @@ class TestHealthInsightsStructured:
 
         assert result["score"] == 72
 
-    @patch("src.ai._chat_with_tool", side_effect=Exception("fail"))
-    @patch("src.ai._chat")
+    @patch("src.ai.insights.chat_with_tool", side_effect=Exception("fail"))
+    @patch("src.ai.insights.chat")
     def test_fallback_with_invalid_json(self, mock_chat, mock_tool):
         mock_chat.return_value = "I couldn't analyze your files properly."
 
@@ -285,22 +285,22 @@ class TestHealthInsightsStructured:
 
 class TestToolSchemas:
     def test_classify_tool_schema_has_required_fields(self):
-        from src.ai import _CLASSIFY_TOOL_SCHEMA
+        from src.ai.classification import _CLASSIFY_TOOL_SCHEMA
         assert "tags" in _CLASSIFY_TOOL_SCHEMA["properties"]
         assert "tags" in _CLASSIFY_TOOL_SCHEMA["required"]
 
     def test_classify_batch_tool_schema(self):
-        from src.ai import _CLASSIFY_BATCH_TOOL_SCHEMA
+        from src.ai.classification import _CLASSIFY_BATCH_TOOL_SCHEMA
         assert "classifications" in _CLASSIFY_BATCH_TOOL_SCHEMA["properties"]
         assert "classifications" in _CLASSIFY_BATCH_TOOL_SCHEMA["required"]
 
     def test_sql_tool_schema(self):
-        from src.ai import _SQL_TOOL_SCHEMA
+        from src.ai.query import _SQL_TOOL_SCHEMA
         assert "sql" in _SQL_TOOL_SCHEMA["properties"]
         assert _SQL_TOOL_SCHEMA["properties"]["sql"]["type"] == "string"
 
     def test_health_tool_schema(self):
-        from src.ai import _HEALTH_TOOL_SCHEMA
+        from src.ai.insights import _HEALTH_TOOL_SCHEMA
         required = _HEALTH_TOOL_SCHEMA["required"]
         assert "score" in required
         assert "grade" in required

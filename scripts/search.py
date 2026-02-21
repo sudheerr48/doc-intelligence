@@ -15,8 +15,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
 
 
 console = Console()

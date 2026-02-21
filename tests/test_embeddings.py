@@ -1,5 +1,5 @@
 """
-Tests for embedding storage and semantic search (src/storage.py embeddings + src/ai.py).
+Tests for embedding storage and semantic search (src/core/database.py embeddings + src/ai/).
 """
 
 import json
@@ -10,8 +10,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.scanner import FileInfo
-from src.storage import FileDatabase
+from src.core.models import FileInfo
+from src.core.database import FileDatabase
 
 
 # ---------------------------------------------------------------------------
@@ -219,16 +219,16 @@ class TestSemanticSearch:
 
 class TestGenerateEmbeddings:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
-        ai_mod._embedding_client = None
-        ai_mod._embedding_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
+        pmod._embedding_client = None
+        pmod._embedding_provider = None
 
-    @patch("src.ai._get_embedding_client")
+    @patch("src.ai.embeddings.get_embedding_client")
     def test_generate_embeddings(self, mock_get_client):
-        import src.ai as ai_mod
-        ai_mod._embedding_provider = "openai"
+        import src.ai.providers as pmod
+        pmod._embedding_provider = "openai"
 
         mock_client = MagicMock()
         mock_item1 = MagicMock()

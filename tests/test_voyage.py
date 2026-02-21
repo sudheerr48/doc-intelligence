@@ -1,5 +1,5 @@
 """
-Tests for Voyage AI embedding support in src/ai.py.
+Tests for Voyage AI embedding support in src/ai.
 """
 
 import os
@@ -10,16 +10,16 @@ import pytest
 
 class TestEmbeddingProviderDetection:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
-        ai_mod._embedding_client = None
-        ai_mod._embedding_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
+        pmod._embedding_client = None
+        pmod._embedding_provider = None
 
     def test_detect_voyage_when_key_and_package(self):
         with patch.dict(os.environ, {"VOYAGE_API_KEY": "pa-test"}, clear=True):
             with patch.dict("sys.modules", {"voyageai": MagicMock()}):
-                from src.ai import _detect_embedding_provider
+                from src.ai.providers import _detect_embedding_provider
                 assert _detect_embedding_provider() == "voyage"
 
     def test_detect_openai_when_no_voyage(self):
@@ -32,7 +32,7 @@ class TestEmbeddingProviderDetection:
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
             os.environ.pop("VOYAGE_API_KEY", None)
-            from src.ai import _detect_embedding_provider
+            from src.ai.providers import _detect_embedding_provider
             if openai_installed:
                 result = _detect_embedding_provider()
                 assert result == "openai"
@@ -47,23 +47,23 @@ class TestEmbeddingProviderDetection:
             "OPENAI_API_KEY": "sk-test",
         }, clear=True):
             with patch.dict("sys.modules", {"voyageai": MagicMock()}):
-                from src.ai import _detect_embedding_provider
+                from src.ai.providers import _detect_embedding_provider
                 assert _detect_embedding_provider() == "voyage"
 
     def test_no_key_raises(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("VOYAGE_API_KEY", None)
             os.environ.pop("OPENAI_API_KEY", None)
-            from src.ai import _detect_embedding_provider
+            from src.ai.providers import _detect_embedding_provider
             with pytest.raises(RuntimeError, match="No embedding API key found"):
                 _detect_embedding_provider()
 
 
 class TestIsEmbeddingAvailable:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._embedding_client = None
-        ai_mod._embedding_provider = None
+        import src.ai.providers as pmod
+        pmod._embedding_client = None
+        pmod._embedding_provider = None
 
     def test_available_with_voyage_key(self):
         with patch.dict(os.environ, {"VOYAGE_API_KEY": "pa-test"}, clear=True):
@@ -89,17 +89,17 @@ class TestIsEmbeddingAvailable:
 
 class TestGenerateEmbeddingsVoyage:
     def setup_method(self):
-        import src.ai as ai_mod
-        ai_mod._client = None
-        ai_mod._active_provider = None
-        ai_mod._embedding_client = None
-        ai_mod._embedding_provider = None
+        import src.ai.providers as pmod
+        pmod._client = None
+        pmod._active_provider = None
+        pmod._embedding_client = None
+        pmod._embedding_provider = None
 
-    @patch("src.ai._get_embedding_client")
+    @patch("src.ai.embeddings.get_embedding_client")
     def test_voyage_embedding_generation(self, mock_get_client):
         """Test that Voyage AI embeddings are generated using the correct API."""
-        import src.ai as ai_mod
-        ai_mod._embedding_provider = "voyage"
+        import src.ai.providers as pmod
+        pmod._embedding_provider = "voyage"
 
         mock_client = MagicMock()
         mock_result = MagicMock()
@@ -116,11 +116,11 @@ class TestGenerateEmbeddingsVoyage:
             ["hello", "world"], model="voyage-3.5", input_type="document"
         )
 
-    @patch("src.ai._get_embedding_client")
+    @patch("src.ai.embeddings.get_embedding_client")
     def test_openai_embedding_generation(self, mock_get_client):
         """Test that OpenAI embeddings still work."""
-        import src.ai as ai_mod
-        ai_mod._embedding_provider = "openai"
+        import src.ai.providers as pmod
+        pmod._embedding_provider = "openai"
 
         mock_client = MagicMock()
         mock_item1 = MagicMock()
@@ -139,11 +139,11 @@ class TestGenerateEmbeddingsVoyage:
         assert result[0] == [0.1, 0.2, 0.3]
         mock_client.embeddings.create.assert_called_once()
 
-    @patch("src.ai._get_embedding_client")
+    @patch("src.ai.embeddings.get_embedding_client")
     def test_truncates_long_texts(self, mock_get_client):
         """Texts longer than 8000 chars should be truncated."""
-        import src.ai as ai_mod
-        ai_mod._embedding_provider = "openai"
+        import src.ai.providers as pmod
+        pmod._embedding_provider = "openai"
 
         mock_client = MagicMock()
         mock_item = MagicMock()

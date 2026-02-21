@@ -8,12 +8,12 @@ from datetime import datetime
 
 import pytest
 
-from src.extractors import (
+from src.scanner.extractors import (
     extract_text, _extract_pdf, _extract_plaintext,
     _extract_docx, _extract_xlsx, MAX_TEXT_LENGTH,
 )
-from src.scanner import FileInfo
-from src.storage import FileDatabase
+from src.core.models import FileInfo
+from src.core.database import FileDatabase
 
 
 # ---------------------------------------------------------------------------

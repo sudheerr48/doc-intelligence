@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from src.undo import (
+from src.analysis.undo import (
     load_manifest,
     save_manifest,
     record_deletion,
@@ -178,8 +178,8 @@ class TestFindRecoverable:
 
     def test_with_matching_file(self, db_path, tmp_path, manifest_dir):
         """Finds recoverable file with same hash."""
-        from src.storage import FileDatabase
-        from src.scanner import FileInfo
+        from src.core.database import FileDatabase
+        from src.core.models import FileInfo
 
         # Create a real file
         real_file = tmp_path / "keeper.txt"
@@ -203,7 +203,7 @@ class TestFindRecoverable:
 
     def test_no_matching_file(self, db_path, manifest_dir):
         """Returns None when no file with matching hash exists."""
-        from src.storage import FileDatabase
+        from src.core.database import FileDatabase
 
         db = FileDatabase(db_path)
         result = find_recoverable("nonexistent_hash", db=db, manifest_dir=manifest_dir)

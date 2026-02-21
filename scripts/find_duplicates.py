@@ -18,9 +18,9 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from src.storage import FileDatabase
-from src.staging import auto_stage_duplicates, STAGING_FOLDER
-from src.utils import load_config, format_size
+from src.core.database import FileDatabase
+from src.analysis.duplicates import auto_stage_duplicates, STAGING_FOLDER
+from src.core.config import load_config, format_size
 
 
 console = Console()

@@ -8,8 +8,8 @@ from datetime import datetime
 
 import pytest
 
-from src.scanner import FileInfo
-from src.storage import FileDatabase
+from src.core.models import FileInfo
+from src.core.database import FileDatabase
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +509,7 @@ class TestEndToEnd:
 
     def test_scan_and_find_duplicates(self, duplicate_files, db_path):
         """Full pipeline: scan duplicate_files fixture, store, find dups."""
-        from src.scanner import scan_folder_parallel
+        from src.scanner.engine import scan_folder_parallel
 
         files = scan_folder_parallel(
             root_path=str(duplicate_files),

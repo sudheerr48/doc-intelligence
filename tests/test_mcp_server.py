@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.scanner import FileInfo
-from src.storage import FileDatabase
+from src.core.models import FileInfo
+from src.core.database import FileDatabase
 
 
 def make_file_info(
@@ -169,7 +169,7 @@ class TestMCPServerCreation:
         if mcp_spec is not None:
             pytest.skip("mcp package is installed — can't test ImportError path")
 
-        from src.mcp_server import create_mcp_server
+        from src.mcp.server import create_mcp_server
         with pytest.raises(ImportError, match="mcp"):
             create_mcp_server()
 
@@ -177,10 +177,10 @@ class TestMCPServerCreation:
         """_get_db should raise FileNotFoundError if DB doesn't exist."""
         from unittest.mock import patch
 
-        with patch("src.mcp_server.load_config") as mock_config:
+        with patch("src.mcp.server.load_config") as mock_config:
             mock_config.return_value = {
                 "database": {"path": str(tmp_path / "nonexistent.duckdb")},
             }
-            from src.mcp_server import _get_db
+            from src.mcp.server import _get_db
             with pytest.raises(FileNotFoundError, match="Database not found"):
                 _get_db()

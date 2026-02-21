@@ -21,9 +21,9 @@ from rich.columns import Columns
 from rich.text import Text
 from rich.rule import Rule
 
-from src.scanner import scan_folder_incremental, NUM_WORKERS, _collect_files_with_stats
-from src.storage import FileDatabase
-from src.utils import load_config, format_size
+from src.scanner.engine import scan_folder_incremental, NUM_WORKERS, _collect_files_with_stats
+from src.core.database import FileDatabase
+from src.core.config import load_config, format_size
 
 
 console = Console()

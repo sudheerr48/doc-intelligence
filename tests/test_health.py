@@ -5,7 +5,7 @@ Tests scoring logic and report generation.
 
 import pytest
 
-from src.health import compute_health_score, generate_health_text
+from src.analysis.health import compute_health_score, generate_health_text
 
 
 # ---------------------------------------------------------------------------
