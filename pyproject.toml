@@ -31,8 +31,11 @@ dashboard = [
 ai = [
     "anthropic>=0.39.0",
 ]
+openai = [
+    "openai>=1.0.0",
+]
 all = [
-    "doc-intelligence[images,dashboard,ai]",
+    "doc-intelligence[images,dashboard,ai,openai]",
 ]
 
 [project.scripts]

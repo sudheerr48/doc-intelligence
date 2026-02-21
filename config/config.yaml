@@ -51,8 +51,14 @@ staging:
 reports:
   output_dir: ./data/reports
 
-# AI-powered features (requires ANTHROPIC_API_KEY env var)
+# AI-powered features
+# Supported providers: anthropic (requires ANTHROPIC_API_KEY), openai (requires OPENAI_API_KEY)
+# Provider is auto-detected from available API keys, or set explicitly below.
 ai:
-  model: claude-sonnet-4-20250514       # Claude model for AI features
-  batch_size: 20                # Files per API call for tagging
-  max_tag_files: 500            # Max files to tag per run
+  provider: auto                        # auto | anthropic | openai
+  anthropic:
+    model: claude-sonnet-4-20250514     # Default Anthropic model
+  openai:
+    model: gpt-4o                       # Default OpenAI model
+  batch_size: 20                        # Files per API call for tagging
+  max_tag_files: 500                    # Max files to tag per run

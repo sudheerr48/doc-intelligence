@@ -318,19 +318,24 @@ def history(
 def tag(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
     limit: int = typer.Option(100, "--limit", "-l", help="Max files to tag per run"),
-    model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m", help="Claude model to use"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use (default depends on provider)"),
     retag: bool = typer.Option(False, "--retag", help="Re-tag files that already have tags"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic or openai (auto-detected by default)"),
 ):
-    """AI-classify files and assign tags (requires ANTHROPIC_API_KEY)."""
+    """AI-classify files and assign tags (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)."""
     try:
-        from src.ai import classify_batch, is_ai_available
+        from src.ai import classify_batch, is_ai_available, set_provider, get_provider
     except ImportError:
-        console.print("[red]AI features require: pip install 'doc-intelligence[ai]'[/red]")
+        console.print("[red]AI features require: pip install 'doc-intelligence[ai]' or 'doc-intelligence[openai]'[/red]")
         return
 
+    if provider:
+        set_provider(provider)
+
     if not is_ai_available():
-        console.print("[red]Set ANTHROPIC_API_KEY environment variable first.[/red]")
-        console.print("[dim]Get your key at https://console.anthropic.com/settings/keys[/dim]")
+        console.print("[red]No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.[/red]")
+        console.print("[dim]Anthropic: https://console.anthropic.com/settings/keys[/dim]")
+        console.print("[dim]OpenAI:    https://platform.openai.com/api-keys[/dim]")
         return
 
     cfg = load_config(config)
@@ -360,7 +365,8 @@ def tag(
         db.close()
         return
 
-    console.print(f"\n[bold blue]Classifying {len(files)} files with AI...[/bold blue]")
+    active_provider = get_provider()
+    console.print(f"\n[bold blue]Classifying {len(files)} files with AI ({active_provider})...[/bold blue]")
 
     from tqdm import tqdm
     tag_map = {}
@@ -400,18 +406,22 @@ def tag(
 def ask(
     query: str = typer.Argument(..., help="Natural language question about your files"),
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
-    model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m", help="Claude model to use"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use (default depends on provider)"),
     show_sql: bool = typer.Option(False, "--show-sql", help="Show the generated SQL query"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic or openai (auto-detected by default)"),
 ):
-    """Ask questions about your files in plain English (requires ANTHROPIC_API_KEY)."""
+    """Ask questions about your files in plain English (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)."""
     try:
-        from src.ai import nl_to_sql, is_ai_available
+        from src.ai import nl_to_sql, is_ai_available, set_provider
     except ImportError:
-        console.print("[red]AI features require: pip install 'doc-intelligence[ai]'[/red]")
+        console.print("[red]AI features require: pip install 'doc-intelligence[ai]' or 'doc-intelligence[openai]'[/red]")
         return
 
+    if provider:
+        set_provider(provider)
+
     if not is_ai_available():
-        console.print("[red]Set ANTHROPIC_API_KEY environment variable first.[/red]")
+        console.print("[red]No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.[/red]")
         return
 
     cfg = load_config(config)
@@ -479,9 +489,10 @@ def ask(
 @app.command()
 def health(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
-    ai_insights: bool = typer.Option(False, "--ai", help="Add AI-powered analysis (requires ANTHROPIC_API_KEY)"),
+    ai_insights: bool = typer.Option(False, "--ai", help="Add AI-powered analysis (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Save report to file"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON instead of text"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic or openai (auto-detected by default)"),
 ):
     """Generate a file system health report with scoring and recommendations."""
     import json as _json
@@ -503,7 +514,9 @@ def health(
     # Optionally enhance with AI
     if ai_insights:
         try:
-            from src.ai import generate_health_insights, is_ai_available
+            from src.ai import generate_health_insights, is_ai_available, set_provider
+            if provider:
+                set_provider(provider)
             if is_ai_available():
                 console.print("[dim]Getting AI health insights...[/dim]")
                 ai_health = generate_health_insights(metrics)

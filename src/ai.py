@@ -1,10 +1,13 @@
 """
 AI Module
 Provides AI-powered file classification, natural language queries,
-and intelligent health insights using the Anthropic Claude API.
+and intelligent health insights using LLM APIs.
 
-Requires: pip install 'doc-intelligence[ai]'
-Set ANTHROPIC_API_KEY environment variable before use.
+Supported providers:
+  - Anthropic Claude: pip install 'doc-intelligence[ai]' + ANTHROPIC_API_KEY
+  - OpenAI: pip install 'doc-intelligence[openai]' + OPENAI_API_KEY
+
+Set the relevant API key environment variable before use.
 """
 
 import os
@@ -14,35 +17,122 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Lazy Anthropic client
+# Provider detection and client management
 # ---------------------------------------------------------------------------
 
+DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o",
+}
+
 _client = None
+_active_provider: Optional[str] = None
+
+
+def _detect_provider() -> str:
+    """Auto-detect which AI provider to use based on available API keys."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    raise RuntimeError(
+        "No AI API key found. Set one of:\n"
+        "  ANTHROPIC_API_KEY — get yours at https://console.anthropic.com/settings/keys\n"
+        "  OPENAI_API_KEY    — get yours at https://platform.openai.com/api-keys"
+    )
+
+
+def get_provider() -> str:
+    """Return the currently active provider name."""
+    global _active_provider
+    if _active_provider is None:
+        _active_provider = _detect_provider()
+    return _active_provider
+
+
+def set_provider(provider: str) -> None:
+    """Explicitly set the AI provider ('anthropic' or 'openai')."""
+    global _client, _active_provider
+    if provider not in ("anthropic", "openai"):
+        raise ValueError(f"Unknown provider '{provider}'. Use 'anthropic' or 'openai'.")
+    _active_provider = provider
+    _client = None  # reset cached client
 
 
 def _get_client():
-    """Get or create the Anthropic client (lazy init)."""
-    global _client
+    """Get or create the LLM client (lazy init)."""
+    global _client, _active_provider
     if _client is not None:
         return _client
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY environment variable is not set.\n"
-            "Get your key at https://console.anthropic.com/settings/keys"
-        )
+    provider = get_provider()
 
-    try:
-        import anthropic
-    except ImportError:
-        raise ImportError(
-            "anthropic package not installed.\n"
-            "Install with: pip install 'doc-intelligence[ai]'"
-        )
+    if provider == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY environment variable is not set.\n"
+                "Get your key at https://console.anthropic.com/settings/keys"
+            )
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError(
+                "anthropic package not installed.\n"
+                "Install with: pip install 'doc-intelligence[ai]'"
+            )
+        _client = anthropic.Anthropic(api_key=api_key)
 
-    _client = anthropic.Anthropic(api_key=api_key)
+    elif provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY environment variable is not set.\n"
+                "Get your key at https://platform.openai.com/api-keys"
+            )
+        try:
+            import openai
+        except ImportError:
+            raise ImportError(
+                "openai package not installed.\n"
+                "Install with: pip install 'doc-intelligence[openai]'"
+            )
+        _client = openai.OpenAI(api_key=api_key)
+
     return _client
+
+
+def _chat(system: str, user_msg: str, model: str, max_tokens: int) -> str:
+    """Unified chat interface that works with both Anthropic and OpenAI."""
+    client = _get_client()
+    provider = get_provider()
+
+    if provider == "anthropic":
+        response = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        return response.content[0].text.strip()
+
+    else:  # openai
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        return response.choices[0].message.content.strip()
+
+
+def _default_model(model: Optional[str] = None) -> str:
+    """Return the given model or the default for the active provider."""
+    if model is not None:
+        return model
+    return DEFAULT_MODELS[get_provider()]
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +159,7 @@ def classify_file(
     path: str,
     size_bytes: int,
     content_text: Optional[str] = None,
-    model: str = "claude-sonnet-4-20250514",
+    model: Optional[str] = None,
 ) -> list[str]:
     """
     Classify a single file and return tags.
@@ -80,13 +170,11 @@ def classify_file(
         path: Full file path
         size_bytes: File size in bytes
         content_text: Optional extracted text content
-        model: Claude model to use
+        model: LLM model to use (defaults to provider's default)
 
     Returns:
         List of tag strings
     """
-    client = _get_client()
-
     snippet = ""
     if content_text:
         snippet = f"\nContent preview (first 500 chars):\n{content_text[:500]}"
@@ -99,20 +187,13 @@ def classify_file(
         f"{snippet}"
     )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=200,
-        system=CLASSIFY_SYSTEM,
-        messages=[{"role": "user", "content": user_msg}],
-    )
-
-    text = response.content[0].text.strip()
+    text = _chat(CLASSIFY_SYSTEM, user_msg, _default_model(model), max_tokens=200)
     return _parse_tags(text)
 
 
 def classify_batch(
     files: list[dict],
-    model: str = "claude-sonnet-4-20250514",
+    model: Optional[str] = None,
     batch_size: int = 20,
 ) -> dict[str, list[str]]:
     """
@@ -121,13 +202,13 @@ def classify_batch(
 
     Args:
         files: List of dicts with keys: path, name, extension, size_bytes, content_text
-        model: Claude model to use
+        model: LLM model to use (defaults to provider's default)
         batch_size: Files per API call
 
     Returns:
         Dict mapping path -> list of tags
     """
-    client = _get_client()
+    resolved_model = _default_model(model)
     results: dict[str, list[str]] = {}
 
     for i in range(0, len(files), batch_size):
@@ -150,14 +231,7 @@ def classify_batch(
             + "\n".join(file_descriptions)
         )
 
-        response = client.messages.create(
-            model=model,
-            max_tokens=1500,
-            system=CLASSIFY_SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-
-        text = response.content[0].text.strip()
+        text = _chat(CLASSIFY_SYSTEM, user_msg, resolved_model, max_tokens=1500)
         batch_tags = _parse_batch_tags(text)
 
         for idx_str, tags in batch_tags.items():
@@ -209,27 +283,18 @@ Rules:
 """
 
 
-def nl_to_sql(query: str, model: str = "claude-sonnet-4-20250514") -> str:
+def nl_to_sql(query: str, model: Optional[str] = None) -> str:
     """
     Convert a natural language query to a DuckDB SQL SELECT statement.
 
     Args:
         query: Natural language question about the file index
-        model: Claude model to use
+        model: LLM model to use (defaults to provider's default)
 
     Returns:
         SQL SELECT query string
     """
-    client = _get_client()
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=500,
-        system=NL_QUERY_SYSTEM,
-        messages=[{"role": "user", "content": query}],
-    )
-
-    sql = response.content[0].text.strip()
+    sql = _chat(NL_QUERY_SYSTEM, query, _default_model(model), max_tokens=500)
 
     # Strip markdown code fences if model included them
     if sql.startswith("```"):
@@ -259,30 +324,25 @@ Be specific with numbers. Reference actual file names and sizes when relevant.\
 """
 
 
-def generate_health_insights(metrics: dict, model: str = "claude-sonnet-4-20250514") -> dict:
+def generate_health_insights(metrics: dict, model: Optional[str] = None) -> dict:
     """
     Generate AI-powered health insights from file system metrics.
 
     Args:
         metrics: Health metrics dict from FileDatabase.get_health_metrics()
-        model: Claude model to use
+        model: LLM model to use (defaults to provider's default)
 
     Returns:
         Dict with score, grade, summary, issues, recommendations
     """
-    client = _get_client()
-
-    # Build a compact metrics summary for the prompt
     metrics_text = json.dumps(metrics, indent=2, default=str)
 
-    response = client.messages.create(
-        model=model,
+    text = _chat(
+        HEALTH_SYSTEM,
+        f"Analyze these file system metrics:\n\n{metrics_text}",
+        _default_model(model),
         max_tokens=1000,
-        system=HEALTH_SYSTEM,
-        messages=[{"role": "user", "content": f"Analyze these file system metrics:\n\n{metrics_text}"}],
     )
-
-    text = response.content[0].text.strip()
 
     # Strip markdown fences
     if text.startswith("```"):
@@ -341,10 +401,20 @@ def _parse_batch_tags(text: str) -> dict[str, list[str]]:
 
 def is_ai_available() -> bool:
     """Check if AI features are available (API key set and package installed)."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return False
-    try:
-        import anthropic  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    # Check Anthropic
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic  # noqa: F401
+            return True
+        except ImportError:
+            pass
+
+    # Check OpenAI
+    if os.environ.get("OPENAI_API_KEY"):
+        try:
+            import openai  # noqa: F401
+            return True
+        except ImportError:
+            pass
+
+    return False

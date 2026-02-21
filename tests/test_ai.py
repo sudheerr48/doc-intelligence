@@ -87,18 +87,80 @@ class TestParseBatchTags:
 class TestIsAiAvailable:
     def test_no_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
-            # Remove ANTHROPIC_API_KEY if present
             os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("OPENAI_API_KEY", None)
             assert is_ai_available() is False
 
-    def test_with_api_key_no_package(self):
-        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch.dict("sys.modules", {"anthropic": None}):
-                # When import fails
-                result = is_ai_available()
-                # May be True or False depending on whether anthropic is installed
-                # The key check should pass at least
-                assert isinstance(result, bool)
+    def test_with_anthropic_key(self):
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
+            result = is_ai_available()
+            # True if anthropic package is installed, otherwise False
+            assert isinstance(result, bool)
+
+    def test_with_openai_key(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            result = is_ai_available()
+            # True if openai package is installed, otherwise False
+            assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Provider detection tests
+# ---------------------------------------------------------------------------
+
+class TestProviderDetection:
+    def setup_method(self):
+        """Reset global state before each test."""
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
+
+    def test_detect_anthropic(self):
+        from src.ai import _detect_provider
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            assert _detect_provider() == "anthropic"
+
+    def test_detect_openai(self):
+        from src.ai import _detect_provider
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            assert _detect_provider() == "openai"
+
+    def test_anthropic_takes_priority(self):
+        from src.ai import _detect_provider
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant", "OPENAI_API_KEY": "sk-oai"}, clear=True):
+            assert _detect_provider() == "anthropic"
+
+    def test_no_key_raises(self):
+        from src.ai import _detect_provider
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("OPENAI_API_KEY", None)
+            with pytest.raises(RuntimeError, match="No AI API key found"):
+                _detect_provider()
+
+    def test_set_provider_valid(self):
+        from src.ai import set_provider, get_provider
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            set_provider("openai")
+            assert get_provider() == "openai"
+
+    def test_set_provider_invalid(self):
+        from src.ai import set_provider
+        with pytest.raises(ValueError, match="Unknown provider"):
+            set_provider("invalid")
+
+    def test_default_model_anthropic(self):
+        from src.ai import _default_model, set_provider, DEFAULT_MODELS
+        set_provider("anthropic")
+        assert _default_model() == DEFAULT_MODELS["anthropic"]
+        assert _default_model("custom-model") == "custom-model"
+
+    def test_default_model_openai(self):
+        from src.ai import _default_model, set_provider, DEFAULT_MODELS
+        set_provider("openai")
+        assert _default_model() == DEFAULT_MODELS["openai"]
 
 
 # ---------------------------------------------------------------------------
@@ -106,40 +168,39 @@ class TestIsAiAvailable:
 # ---------------------------------------------------------------------------
 
 class TestClassifyFile:
-    @patch("src.ai._get_client")
-    def test_classify_returns_tags(self, mock_get_client):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='["python-script", "development"]')]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+    def setup_method(self):
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
 
-        from src.ai import classify_file
-        tags = classify_file(
-            name="app.py",
-            extension=".py",
-            path="/home/user/app.py",
-            size_bytes=1024,
-        )
+    @patch("src.ai._chat")
+    def test_classify_returns_tags(self, mock_chat):
+        mock_chat.return_value = '["python-script", "development"]'
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import classify_file
+            tags = classify_file(
+                name="app.py",
+                extension=".py",
+                path="/home/user/app.py",
+                size_bytes=1024,
+            )
         assert tags == ["python-script", "development"]
-        mock_client.messages.create.assert_called_once()
+        mock_chat.assert_called_once()
 
-    @patch("src.ai._get_client")
-    def test_classify_with_content(self, mock_get_client):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='["tax-return", "finance", "pdf-document"]')]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+    @patch("src.ai._chat")
+    def test_classify_with_content(self, mock_chat):
+        mock_chat.return_value = '["tax-return", "finance", "pdf-document"]'
 
-        from src.ai import classify_file
-        tags = classify_file(
-            name="2024_taxes.pdf",
-            extension=".pdf",
-            path="/home/user/Documents/2024_taxes.pdf",
-            size_bytes=50000,
-            content_text="Federal Income Tax Return 2024...",
-        )
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import classify_file
+            tags = classify_file(
+                name="2024_taxes.pdf",
+                extension=".pdf",
+                path="/home/user/Documents/2024_taxes.pdf",
+                size_bytes=50000,
+                content_text="Federal Income Tax Return 2024...",
+            )
         assert "tax-return" in tags
         assert "finance" in tags
 
@@ -149,24 +210,24 @@ class TestClassifyFile:
 # ---------------------------------------------------------------------------
 
 class TestClassifyBatch:
-    @patch("src.ai._get_client")
-    def test_batch_classify(self, mock_get_client):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(
-            text='{"1": ["python-script", "dev"], "2": ["photo", "media"]}'
-        )]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+    def setup_method(self):
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
 
-        from src.ai import classify_batch
-        files = [
-            {"path": "/a/app.py", "name": "app.py", "extension": ".py",
-             "size_bytes": 1000, "content_text": None},
-            {"path": "/a/photo.jpg", "name": "photo.jpg", "extension": ".jpg",
-             "size_bytes": 5000, "content_text": None},
-        ]
-        result = classify_batch(files, batch_size=10)
+    @patch("src.ai._chat")
+    def test_batch_classify(self, mock_chat):
+        mock_chat.return_value = '{"1": ["python-script", "dev"], "2": ["photo", "media"]}'
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import classify_batch
+            files = [
+                {"path": "/a/app.py", "name": "app.py", "extension": ".py",
+                 "size_bytes": 1000, "content_text": None},
+                {"path": "/a/photo.jpg", "name": "photo.jpg", "extension": ".jpg",
+                 "size_bytes": 5000, "content_text": None},
+            ]
+            result = classify_batch(files, batch_size=10)
         assert "/a/app.py" in result
         assert "/a/photo.jpg" in result
 
@@ -176,30 +237,29 @@ class TestClassifyBatch:
 # ---------------------------------------------------------------------------
 
 class TestNlToSql:
-    @patch("src.ai._get_client")
-    def test_nl_to_sql_simple(self, mock_get_client):
-        mock_client = MagicMock()
-        expected_sql = "SELECT name, size_bytes FROM files WHERE extension = '.pdf' ORDER BY size_bytes DESC LIMIT 100"
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=expected_sql)]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+    def setup_method(self):
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
 
-        from src.ai import nl_to_sql
-        sql = nl_to_sql("show me the largest PDF files")
+    @patch("src.ai._chat")
+    def test_nl_to_sql_simple(self, mock_chat):
+        expected_sql = "SELECT name, size_bytes FROM files WHERE extension = '.pdf' ORDER BY size_bytes DESC LIMIT 100"
+        mock_chat.return_value = expected_sql
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import nl_to_sql
+            sql = nl_to_sql("show me the largest PDF files")
         assert "SELECT" in sql
         assert ".pdf" in sql.lower() or "pdf" in sql.lower()
 
-    @patch("src.ai._get_client")
-    def test_nl_to_sql_strips_code_fences(self, mock_get_client):
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="```sql\nSELECT * FROM files LIMIT 10\n```")]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+    @patch("src.ai._chat")
+    def test_nl_to_sql_strips_code_fences(self, mock_chat):
+        mock_chat.return_value = "```sql\nSELECT * FROM files LIMIT 10\n```"
 
-        from src.ai import nl_to_sql
-        sql = nl_to_sql("show all files")
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import nl_to_sql
+            sql = nl_to_sql("show all files")
         assert not sql.startswith("```")
         assert "SELECT" in sql
 
@@ -209,9 +269,13 @@ class TestNlToSql:
 # ---------------------------------------------------------------------------
 
 class TestGenerateHealthInsights:
-    @patch("src.ai._get_client")
-    def test_generate_insights(self, mock_get_client):
-        mock_client = MagicMock()
+    def setup_method(self):
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
+
+    @patch("src.ai._chat")
+    def test_generate_insights(self, mock_chat):
         insight = {
             "score": 72,
             "grade": "C",
@@ -219,13 +283,51 @@ class TestGenerateHealthInsights:
             "issues": [{"severity": "medium", "title": "Duplicates", "detail": "Found many."}],
             "recommendations": ["Clean up duplicates."],
         }
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=json.dumps(insight))]
-        mock_client.messages.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
+        mock_chat.return_value = json.dumps(insight)
 
-        from src.ai import generate_health_insights
-        result = generate_health_insights({"total_files": 1000})
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
+            from src.ai import generate_health_insights
+            result = generate_health_insights({"total_files": 1000})
         assert result["score"] == 72
         assert result["grade"] == "C"
         assert len(result["issues"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-specific mock tests
+# ---------------------------------------------------------------------------
+
+class TestOpenAIProvider:
+    def setup_method(self):
+        import src.ai as ai_mod
+        ai_mod._client = None
+        ai_mod._active_provider = None
+
+    @patch("src.ai._chat")
+    def test_classify_with_openai(self, mock_chat):
+        mock_chat.return_value = '["spreadsheet", "finance", "quarterly-report"]'
+
+        from src.ai import set_provider, classify_file
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            set_provider("openai")
+            tags = classify_file(
+                name="q3_report.xlsx",
+                extension=".xlsx",
+                path="/home/user/Reports/q3_report.xlsx",
+                size_bytes=25000,
+            )
+        assert "finance" in tags
+        assert "spreadsheet" in tags
+        mock_chat.assert_called_once()
+
+    @patch("src.ai._chat")
+    def test_nl_query_with_openai(self, mock_chat):
+        expected_sql = "SELECT name, size_bytes FROM files ORDER BY size_bytes DESC LIMIT 10"
+        mock_chat.return_value = expected_sql
+
+        from src.ai import set_provider, nl_to_sql
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            set_provider("openai")
+            sql = nl_to_sql("top 10 largest files")
+        assert "SELECT" in sql
+        assert "ORDER BY size_bytes DESC" in sql
