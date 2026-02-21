@@ -173,8 +173,10 @@ class TestClassifyFile:
         ai_mod._client = None
         ai_mod._active_provider = None
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_classify_returns_tags(self, mock_chat):
+    def test_classify_returns_tags_fallback(self, mock_chat, mock_tool):
+        """Test fallback path when tool_use is unavailable."""
         mock_chat.return_value = '["python-script", "development"]'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -188,8 +190,9 @@ class TestClassifyFile:
         assert tags == ["python-script", "development"]
         mock_chat.assert_called_once()
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_classify_with_content(self, mock_chat):
+    def test_classify_with_content_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '["tax-return", "finance", "pdf-document"]'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -215,8 +218,9 @@ class TestClassifyBatch:
         ai_mod._client = None
         ai_mod._active_provider = None
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_batch_classify(self, mock_chat):
+    def test_batch_classify_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '{"1": ["python-script", "dev"], "2": ["photo", "media"]}'
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -242,8 +246,9 @@ class TestNlToSql:
         ai_mod._client = None
         ai_mod._active_provider = None
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_nl_to_sql_simple(self, mock_chat):
+    def test_nl_to_sql_simple_fallback(self, mock_chat, mock_tool):
         expected_sql = "SELECT name, size_bytes FROM files WHERE extension = '.pdf' ORDER BY size_bytes DESC LIMIT 100"
         mock_chat.return_value = expected_sql
 
@@ -253,8 +258,9 @@ class TestNlToSql:
         assert "SELECT" in sql
         assert ".pdf" in sql.lower() or "pdf" in sql.lower()
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_nl_to_sql_strips_code_fences(self, mock_chat):
+    def test_nl_to_sql_strips_code_fences_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = "```sql\nSELECT * FROM files LIMIT 10\n```"
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}):
@@ -274,8 +280,9 @@ class TestGenerateHealthInsights:
         ai_mod._client = None
         ai_mod._active_provider = None
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_generate_insights(self, mock_chat):
+    def test_generate_insights_fallback(self, mock_chat, mock_tool):
         insight = {
             "score": 72,
             "grade": "C",
@@ -303,8 +310,9 @@ class TestOpenAIProvider:
         ai_mod._client = None
         ai_mod._active_provider = None
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_classify_with_openai(self, mock_chat):
+    def test_classify_with_openai_fallback(self, mock_chat, mock_tool):
         mock_chat.return_value = '["spreadsheet", "finance", "quarterly-report"]'
 
         from src.ai import set_provider, classify_file
@@ -320,8 +328,9 @@ class TestOpenAIProvider:
         assert "spreadsheet" in tags
         mock_chat.assert_called_once()
 
+    @patch("src.ai._chat_with_tool", side_effect=Exception("no real API"))
     @patch("src.ai._chat")
-    def test_nl_query_with_openai(self, mock_chat):
+    def test_nl_query_with_openai_fallback(self, mock_chat, mock_tool):
         expected_sql = "SELECT name, size_bytes FROM files ORDER BY size_bytes DESC LIMIT 10"
         mock_chat.return_value = expected_sql
 

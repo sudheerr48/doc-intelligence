@@ -35,12 +35,18 @@ ai = [
 openai = [
     "openai>=1.0.0",
 ]
+voyage = [
+    "voyageai>=0.3.0",
+]
 docs = [
     "python-docx>=1.0.0",
     "openpyxl>=3.1.0",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 all = [
-    "doc-intelligence[images,dashboard,ai,openai,docs]",
+    "doc-intelligence[images,dashboard,ai,openai,voyage,docs,mcp]",
 ]
 
 [project.scripts]

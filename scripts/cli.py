@@ -22,6 +22,7 @@ Usage:
     doc-intelligence health [OPTIONS]   # File system health report
     doc-intelligence embed [OPTIONS]    # Generate embeddings for semantic search
     doc-intelligence semantic-search Q  # Search files by meaning
+    doc-intelligence serve [OPTIONS]    # Start MCP server for AI assistants
 """
 
 import json
@@ -813,21 +814,21 @@ def tags(
 def embed(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
     limit: int = typer.Option(500, "--limit", "-l", help="Max files to embed per run"),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Embedding model (default: text-embedding-3-small)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Embedding model (default: auto-detected)"),
 ):
-    """Generate embeddings for semantic search (requires OPENAI_API_KEY)."""
+    """Generate embeddings for semantic search (requires VOYAGE_API_KEY or OPENAI_API_KEY)."""
     try:
         from src.ai import generate_embeddings, is_embedding_available
     except ImportError:
-        console.print("[red]Embedding features require: pip install 'doc-intelligence\\[openai]'[/red]")
+        console.print("[red]Embedding features require: pip install 'doc-intelligence\\[voyage]' or 'doc-intelligence\\[openai]'[/red]")
         return
 
     if not is_embedding_available():
         console.print(Panel(
-            "[bold red]OPENAI_API_KEY not set[/bold red]\n\n"
-            "Embeddings require an OpenAI API key.\n"
-            "Add to your .env file or export it:\n"
-            "  [cyan]OPENAI_API_KEY=sk-...[/cyan]",
+            "[bold red]No embedding API key found[/bold red]\n\n"
+            "Set one of these environment variables (or add to .env):\n"
+            "  [cyan]VOYAGE_API_KEY[/cyan]   Voyage AI (Anthropic partner): pip install voyageai\n"
+            "  [cyan]OPENAI_API_KEY[/cyan]   OpenAI embeddings: pip install openai",
             border_style="red", title="Setup Required",
         ))
         return
@@ -849,7 +850,13 @@ def embed(
 
     _header("Embedding Generation")
 
-    embedding_model = model or "text-embedding-3-small"
+    from src.ai import _detect_embedding_provider, DEFAULT_EMBEDDING_MODELS
+    try:
+        emb_provider = _detect_embedding_provider()
+    except RuntimeError:
+        emb_provider = "openai"
+    embedding_model = model or DEFAULT_EMBEDDING_MODELS.get(emb_provider, "text-embedding-3-small")
+    console.print(f"  Provider: [bold cyan]{emb_provider}[/bold cyan]")
     console.print(f"  Model: [bold cyan]{embedding_model}[/bold cyan]   Files: [bold]{len(files)}[/bold]\n")
 
     # Build text representations
@@ -914,15 +921,15 @@ def semantic_search(
     limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
     threshold: float = typer.Option(0.3, "--threshold", "-t", help="Minimum similarity score (0-1)"),
 ):
-    """Search files by meaning using embeddings (requires OPENAI_API_KEY)."""
+    """Search files by meaning using embeddings (requires VOYAGE_API_KEY or OPENAI_API_KEY)."""
     try:
         from src.ai import generate_embeddings, is_embedding_available
     except ImportError:
-        console.print("[red]Semantic search requires: pip install 'doc-intelligence\\[openai]'[/red]")
+        console.print("[red]Semantic search requires: pip install 'doc-intelligence\\[voyage]' or 'doc-intelligence\\[openai]'[/red]")
         return
 
     if not is_embedding_available():
-        console.print("[red]Set OPENAI_API_KEY for semantic search.[/red]")
+        console.print("[red]Set VOYAGE_API_KEY or OPENAI_API_KEY for semantic search.[/red]")
         return
 
     cfg, db = _open_db(config)
@@ -994,6 +1001,46 @@ def semantic_search(
     console.print(table)
     console.print()
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# serve (MCP server)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def serve(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    transport: str = typer.Option("stdio", "--transport", "-t", help="Transport: stdio or http"),
+    port: int = typer.Option(8765, "--port", help="Port for HTTP transport"),
+):
+    """Start the MCP server for AI assistants (Claude Desktop, VS Code, etc.)."""
+    try:
+        from src.mcp_server import run_mcp_server
+    except ImportError:
+        console.print(Panel(
+            "[bold red]MCP server requires the 'mcp' package[/bold red]\n\n"
+            "Install with: [cyan]pip install 'doc-intelligence\\[mcp]'[/cyan]",
+            border_style="red", title="Setup Required",
+        ))
+        return
+
+    if transport == "stdio":
+        # In stdio mode, don't print to stdout (MCP uses it for communication)
+        import sys
+        sys.stderr.write(
+            f"Doc Intelligence MCP Server v{_VERSION}\n"
+            f"Transport: {transport}\n"
+            "Ready for connections...\n"
+        )
+    else:
+        _header("MCP Server")
+        console.print(f"  Transport: [bold cyan]{transport}[/bold cyan]")
+        if transport == "http":
+            console.print(f"  Port: [bold cyan]{port}[/bold cyan]")
+        console.print()
+        console.print("[dim]Waiting for MCP client connections...[/dim]\n")
+
+    run_mcp_server(config_path=config, transport=transport, port=port)
 
 
 # ---------------------------------------------------------------------------

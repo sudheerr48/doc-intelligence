@@ -223,9 +223,13 @@ class TestGenerateEmbeddings:
         ai_mod._client = None
         ai_mod._active_provider = None
         ai_mod._embedding_client = None
+        ai_mod._embedding_provider = None
 
     @patch("src.ai._get_embedding_client")
     def test_generate_embeddings(self, mock_get_client):
+        import src.ai as ai_mod
+        ai_mod._embedding_provider = "openai"
+
         mock_client = MagicMock()
         mock_item1 = MagicMock()
         mock_item1.embedding = [0.1, 0.2, 0.3]
@@ -250,11 +254,20 @@ class TestIsEmbeddingAvailable:
     def test_no_key(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("VOYAGE_API_KEY", None)
             from src.ai import is_embedding_available
             assert is_embedding_available() is False
 
-    def test_with_key(self):
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+    def test_with_openai_key(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            os.environ.pop("VOYAGE_API_KEY", None)
             from src.ai import is_embedding_available
             result = is_embedding_available()
             assert isinstance(result, bool)
+
+    def test_with_voyage_key(self):
+        with patch.dict(os.environ, {"VOYAGE_API_KEY": "pa-test"}, clear=True):
+            os.environ.pop("OPENAI_API_KEY", None)
+            with patch.dict("sys.modules", {"voyageai": MagicMock()}):
+                from src.ai import is_embedding_available
+                assert is_embedding_available() is True

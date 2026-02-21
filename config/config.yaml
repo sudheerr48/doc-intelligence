@@ -63,8 +63,18 @@ ai:
   batch_size: 20                        # Files per API call for tagging
   max_tag_files: 500                    # Max files to tag per run
 
-# Semantic search (requires OPENAI_API_KEY for embeddings)
+# Semantic search embeddings
+# Supports: Voyage AI (VOYAGE_API_KEY) or OpenAI (OPENAI_API_KEY)
+# Provider is auto-detected from available API keys
 embeddings:
-  model: text-embedding-3-small         # OpenAI embedding model
+  # model: voyage-3.5                   # Voyage AI (Anthropic partner) — default with VOYAGE_API_KEY
+  # model: text-embedding-3-small       # OpenAI — default with OPENAI_API_KEY
   batch_size: 100                       # Texts per API call
   max_files: 500                        # Max files to embed per run
+
+# MCP Server (Model Context Protocol)
+# Exposes file index as tools for AI assistants (Claude Desktop, VS Code, etc.)
+# Start with: doc-intelligence serve
+mcp:
+  transport: stdio                      # stdio (for Claude Desktop) or http
+  port: 8765                            # Port for HTTP transport
