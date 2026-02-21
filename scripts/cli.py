@@ -1074,6 +1074,42 @@ def dashboard(
 
 
 # ---------------------------------------------------------------------------
+# providers (plugin introspection)
+# ---------------------------------------------------------------------------
+
+@app.command("providers")
+def providers_cmd(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+):
+    """Show registered providers and current selections."""
+    from src.providers.registry import list_all, COMPONENT_TYPES
+
+    cfg = load_config(config)
+    prov_config = cfg.get("providers", {})
+
+    _header("Providers")
+
+    table = Table(border_style="bright_black", show_lines=False, pad_edge=True)
+    table.add_column("Component", style="bold cyan", width=14)
+    table.add_column("Active", style="bold green", width=22)
+    table.add_column("Available", style="white")
+
+    all_providers = list_all()
+    for component_type in sorted(COMPONENT_TYPES):
+        active = prov_config.get(component_type, "builtin")
+        available = all_providers.get(component_type, [])
+        available_str = ", ".join(
+            f"[bold]{n}[/bold]" if n == active else n
+            for n in available
+        ) or "[dim](none)[/dim]"
+        table.add_row(component_type, active, available_str)
+
+    console.print(table)
+    console.print()
+    console.print("[dim]Edit config.yaml 'providers' section to switch. See PLUGINS.md to add your own.[/dim]\n")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

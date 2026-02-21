@@ -72,6 +72,28 @@ embeddings:
   batch_size: 100                       # Texts per API call
   max_files: 500                        # Max files to embed per run
 
+# ---------------------------------------------------------------------------
+# Swappable providers — change any component without touching code.
+# Run `doc-intelligence providers` to see all registered providers.
+# See PLUGINS.md for how to add your own.
+# ---------------------------------------------------------------------------
+providers:
+  extractor: builtin                    # builtin | unstructured | docling
+  embedding: builtin                    # builtin | sentence-transformers | ollama
+  llm: builtin                         # builtin | ollama
+  classifier: builtin                   # builtin | zero-shot
+  vectorstore: builtin                  # builtin | lancedb | chromadb
+
+  # Per-provider options (passed as kwargs to the provider constructor)
+  # extractor_options: {}
+  # embedding_options:
+  #   model: all-MiniLM-L6-v2
+  #   batch_size: 64
+  # llm_options:
+  #   provider: anthropic             # force a specific LLM backend
+  # classifier_options: {}
+  # vectorstore_options: {}
+
 # MCP Server (Model Context Protocol)
 # Exposes file index as tools for AI assistants (Claude Desktop, VS Code, etc.)
 # Start with: doc-intelligence serve
