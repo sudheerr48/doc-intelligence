@@ -9,18 +9,22 @@ from src.dashboard.components.metrics import (
 )
 
 
+@st.cache_data(ttl=60)
+def _load_health(_db):
+    metrics = _db.get_health_metrics()
+    health_data = compute_health_score(metrics)
+    return metrics, health_data
+
+
 def render(db, config):
     st.subheader("File System Health Report")
 
-    metrics = db.get_health_metrics()
-    health_data = compute_health_score(metrics)
-    score = health_data["score"]
-    grade = health_data["grade"]
+    metrics, health_data = _load_health(db)
 
-    # Score display
+    # Score display — badge + summary side by side
     col_badge, col_info = st.columns([1, 3])
     with col_badge:
-        health_badge(score, grade)
+        health_badge(health_data["score"], health_data["grade"])
     with col_info:
         st.info(health_data["summary"])
         c1, c2, c3, c4 = st.columns(4)
@@ -31,43 +35,59 @@ def render(db, config):
 
     st.divider()
 
+    # Issues + Recommendations side by side
     col1, col2 = st.columns(2)
 
     with col1:
-        # Issues
         st.subheader("Issues")
         if health_data["issues"]:
             for issue in health_data["issues"]:
                 icon = severity_icon(issue["severity"])
-                st.markdown(
-                    f"{icon} **{issue['title']}** — {issue['detail']}"
-                )
+                with st.container():
+                    st.markdown(
+                        f"{icon} **{issue['title']}**  \n"
+                        f"<span style='opacity:0.7;'>{issue['detail']}</span>",
+                        unsafe_allow_html=True,
+                    )
         else:
             st.success("No issues detected!")
 
     with col2:
-        # Recommendations
         st.subheader("Recommendations")
-        for rec in health_data["recommendations"]:
-            st.markdown(f"- {rec}")
+        for i, rec in enumerate(health_data["recommendations"], 1):
+            st.markdown(f"**{i}.** {rec}")
 
     st.divider()
 
-    # Detailed metrics
+    # Secondary metrics
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("New Files (7d)", f"{metrics['new_files_7d']:,}")
     c2.metric("Tagged", f"{metrics['tagged_files']:,}")
     c3.metric("Untagged", f"{metrics['untagged_files']:,}")
-    c4.metric(
-        "Wasted by Dupes",
-        format_size_short(metrics['wasted_by_duplicates']),
-    )
+    c4.metric("Wasted by Dupes", format_size_short(metrics['wasted_by_duplicates']))
 
-    # Top large files
+    # Top large files table
     if metrics["top_large_files"]:
+        st.divider()
         st.subheader("Largest Files")
-        for i, f in enumerate(metrics["top_large_files"][:10], 1):
-            st.text(
-                f"{i}. {f['name']} — {format_size_short(f['size'])} "
-                f"[{f['category']}]"
+        try:
+            import pandas as pd
+            large_df = pd.DataFrame(metrics["top_large_files"][:10])
+            large_df["size_fmt"] = large_df["size"].apply(format_size_short)
+            st.dataframe(
+                large_df[["name", "size_fmt", "ext", "category"]],
+                column_config={
+                    "name": st.column_config.TextColumn("Name", width="large"),
+                    "size_fmt": st.column_config.TextColumn("Size", width="small"),
+                    "ext": st.column_config.TextColumn("Type", width="small"),
+                    "category": st.column_config.TextColumn("Category", width="small"),
+                },
+                use_container_width=True,
+                hide_index=True,
             )
+        except ImportError:
+            for i, f in enumerate(metrics["top_large_files"][:10], 1):
+                st.text(
+                    f"{i}. {f['name']} — {format_size_short(f['size'])} "
+                    f"[{f['category']}]"
+                )

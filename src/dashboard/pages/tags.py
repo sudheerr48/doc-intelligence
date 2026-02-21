@@ -23,23 +23,28 @@ def render(db, config):
         )
         return
 
-    c1, c2 = st.columns(2)
-    c1.metric("Unique Tags", f"{len(all_tags):,}")
+    # Metrics row
     tagged = db.conn.execute(
         "SELECT COUNT(*) FROM files WHERE tags IS NOT NULL AND tags != '[]'"
     ).fetchone()[0]
     total = db.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
-    c2.metric("Tagged Files", f"{tagged:,}", f"of {total:,} total")
+    untagged = total - tagged
+    pct = (tagged / total * 100) if total else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Unique Tags", f"{len(all_tags):,}")
+    c2.metric("Tagged Files", f"{tagged:,}")
+    c3.metric("Untagged", f"{untagged:,}")
+    c4.metric("Coverage", f"{pct:.0f}%")
 
     st.divider()
 
     # Tag chart
-    st.subheader("Top Tags")
     tag_chart(all_tags, top_n=25)
 
     st.divider()
 
-    # Tag browser
+    # Tag browser with multi-select
     selected_tag = st.selectbox(
         "Browse files by tag",
         options=["(select a tag)"] + list(all_tags.keys()),
@@ -54,11 +59,16 @@ def render(db, config):
             df["tags_str"] = df["tags"].apply(
                 lambda t: ", ".join(t[:4]) if isinstance(t, list) else ""
             )
-            st.write(
-                f"**{len(tagged_files)}** files tagged '{selected_tag}'"
-            )
+            st.caption(f"**{len(tagged_files)}** files tagged **{selected_tag}**")
             st.dataframe(
                 df[["name", "size", "category", "tags_str", "path"]],
+                column_config={
+                    "name": st.column_config.TextColumn("Name", width="medium"),
+                    "size": st.column_config.TextColumn("Size", width="small"),
+                    "category": st.column_config.TextColumn("Category", width="small"),
+                    "tags_str": st.column_config.TextColumn("Tags", width="medium"),
+                    "path": st.column_config.TextColumn("Path", width="large"),
+                },
                 use_container_width=True,
                 hide_index=True,
             )

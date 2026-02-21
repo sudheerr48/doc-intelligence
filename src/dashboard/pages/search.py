@@ -19,10 +19,8 @@ def render(db, config):
 
     with tab_text:
         _text_search(db)
-
     with tab_semantic:
         _semantic_search(db)
-
     with tab_ai:
         _ai_query(db)
 
@@ -30,7 +28,8 @@ def render(db, config):
 def _text_search(db):
     st.subheader("Search Files")
     query = st.text_input(
-        "Search query (filename, path, or content)",
+        "Search query",
+        placeholder="filename, path, or content...",
         key="text_search_input",
     )
     if query:
@@ -38,9 +37,19 @@ def _text_search(db):
         if results and pd is not None:
             df = pd.DataFrame(results)
             df["size"] = df["size_bytes"].apply(format_size_short)
-            st.write(f"Found **{len(results)}** results")
+            df["match"] = df["content_match"].apply(
+                lambda x: "content" if x else "name/path"
+            )
+            st.caption(f"Found **{len(results)}** results")
             st.dataframe(
-                df[["name", "size", "category", "path"]],
+                df[["name", "size", "category", "match", "path"]],
+                column_config={
+                    "name": st.column_config.TextColumn("Name", width="medium"),
+                    "size": st.column_config.TextColumn("Size", width="small"),
+                    "category": st.column_config.TextColumn("Category", width="small"),
+                    "match": st.column_config.TextColumn("Match Type", width="small"),
+                    "path": st.column_config.TextColumn("Path", width="large"),
+                },
                 use_container_width=True,
                 hide_index=True,
             )
@@ -67,24 +76,22 @@ def _semantic_search(db):
 
     embed_stats = db.get_embedding_stats()
     if embed_stats["embedded_files"] == 0:
-        st.warning(
-            "No embeddings found. "
-            "Run `doc-intelligence embed` first."
-        )
+        st.warning("No embeddings found. Run `doc-intelligence embed` first.")
         return
 
-    st.caption(
-        f"Searching {embed_stats['embedded_files']} embedded files"
-    )
+    st.caption(f"Searching **{embed_stats['embedded_files']}** embedded files")
 
-    query = st.text_input(
-        "Describe what you're looking for",
-        placeholder="e.g., tax documents from 2024",
-        key="semantic_query",
-    )
-    threshold = st.slider(
-        "Min similarity", 0.0, 1.0, 0.3, 0.05, key="sem_threshold",
-    )
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        query = st.text_input(
+            "Describe what you're looking for",
+            placeholder="e.g., tax documents from 2024",
+            key="semantic_query",
+        )
+    with col2:
+        threshold = st.slider(
+            "Min similarity", 0.0, 1.0, 0.3, 0.05, key="sem_threshold",
+        )
 
     if query:
         with st.spinner("Computing similarity..."):
@@ -92,31 +99,32 @@ def _semantic_search(db):
                 from src.ai.embeddings import generate_embeddings
                 query_vec = generate_embeddings([query])[0]
                 results = db.semantic_search(query_vec, limit=20)
-                results = [
-                    r for r in results if r["similarity"] >= threshold
-                ]
+                results = [r for r in results if r["similarity"] >= threshold]
 
                 if results and pd is not None:
                     df = pd.DataFrame(results)
                     df["size"] = df["size_bytes"].apply(format_size_short)
-                    df["score"] = df["similarity"].apply(
-                        lambda s: f"{s:.3f}"
-                    )
                     if "tags" in df.columns:
                         df["tags_str"] = df["tags"].apply(
                             lambda t: ", ".join(json.loads(t)[:3])
-                            if isinstance(t, str) and t.startswith("[")
-                            else ""
+                            if isinstance(t, str) and t.startswith("[") else ""
                         )
                     else:
                         df["tags_str"] = ""
 
-                    st.write(f"**{len(results)}** matches")
-                    display_cols = [
-                        "score", "name", "size", "tags_str", "path",
-                    ]
+                    st.caption(f"**{len(results)}** matches")
                     st.dataframe(
-                        df[display_cols],
+                        df[["similarity", "name", "size", "tags_str", "path"]],
+                        column_config={
+                            "similarity": st.column_config.ProgressColumn(
+                                "Score", min_value=0.0, max_value=1.0,
+                                format="%.3f",
+                            ),
+                            "name": st.column_config.TextColumn("Name", width="medium"),
+                            "size": st.column_config.TextColumn("Size", width="small"),
+                            "tags_str": st.column_config.TextColumn("Tags", width="medium"),
+                            "path": st.column_config.TextColumn("Path", width="large"),
+                        },
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -128,7 +136,7 @@ def _semantic_search(db):
 
 def _ai_query(db):
     st.subheader("Ask Your Files (AI-Powered)")
-    st.caption("Ask questions in plain English — powered by Claude")
+    st.caption("Ask questions in plain English — powered by Claude or GPT")
 
     try:
         from src.ai.providers import is_ai_available
@@ -146,15 +154,15 @@ def _ai_query(db):
         )
         return
 
-    nl_query = st.text_input(
-        "Ask a question",
-        placeholder=(
-            'e.g., "Show me all PDFs larger than 5MB" '
-            'or "What are my most duplicated files?"'
-        ),
-        key="nl_query",
-    )
-    show_sql = st.checkbox("Show generated SQL", key="show_sql")
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        nl_query = st.text_input(
+            "Ask a question",
+            placeholder='e.g., "Show me all PDFs larger than 5MB"',
+            key="nl_query",
+        )
+    with col2:
+        show_sql = st.checkbox("Show SQL", key="show_sql")
 
     if nl_query:
         with st.spinner("Thinking..."):
@@ -167,7 +175,7 @@ def _ai_query(db):
 
                 results = db.run_query(sql)
                 if results:
-                    st.write(f"**{len(results)}** results")
+                    st.caption(f"**{len(results)}** results")
                     query_results_table(results)
                 else:
                     st.info("No results found.")
