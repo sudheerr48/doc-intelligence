@@ -1,7 +1,7 @@
 [project]
 name = "doc-intelligence"
-version = "3.0.0"
-description = "A fast, local file indexing tool with duplicate detection, full-text search, visual reports, and a web dashboard"
+version = "4.0.0"
+description = "AI-powered file intelligence — persistent indexing, smart tagging, natural language queries, and health reports"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -28,8 +28,11 @@ dashboard = [
     "streamlit>=1.30.0",
     "pandas>=2.0.0",
 ]
+ai = [
+    "anthropic>=0.39.0",
+]
 all = [
-    "doc-intelligence[images,dashboard]",
+    "doc-intelligence[images,dashboard,ai]",
 ]
 
 [project.scripts]

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Unified CLI Entry Point
-Provides a single command with subcommands: scan, duplicates, search, stats,
-big-files, report, similar-images, history, dashboard.
+Provides a single command with subcommands for file intelligence.
 
 Running with no subcommand launches interactive mode.
 
@@ -17,6 +16,10 @@ Usage:
     doc-intelligence similar-images [OPTIONS]
     doc-intelligence history [OPTIONS]
     doc-intelligence dashboard [OPTIONS]
+    doc-intelligence tag [OPTIONS]      # AI-powered file tagging
+    doc-intelligence tags [TAG]         # Browse tags
+    doc-intelligence ask QUERY          # Natural language queries
+    doc-intelligence health [OPTIONS]   # File system health report
 """
 
 import sys
@@ -38,7 +41,8 @@ console = Console()
 
 app = typer.Typer(
     name="doc-intelligence",
-    help="Doc Intelligence - Fast file indexing and duplicate detection.\n\n"
+    help="Doc Intelligence v4.0 — AI-powered file intelligence.\n\n"
+         "Persistent indexing, smart tagging, natural language queries, and health reports.\n\n"
          "Run with no subcommand for interactive mode.",
     invoke_without_command=True,
 )
@@ -308,6 +312,300 @@ def history(
         table.add_row("...", f"... and {len(recent) - 50} more", "", "", "")
 
     console.print(table)
+
+
+@app.command()
+def tag(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Max files to tag per run"),
+    model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m", help="Claude model to use"),
+    retag: bool = typer.Option(False, "--retag", help="Re-tag files that already have tags"),
+):
+    """AI-classify files and assign tags (requires ANTHROPIC_API_KEY)."""
+    try:
+        from src.ai import classify_batch, is_ai_available
+    except ImportError:
+        console.print("[red]AI features require: pip install 'doc-intelligence[ai]'[/red]")
+        return
+
+    if not is_ai_available():
+        console.print("[red]Set ANTHROPIC_API_KEY environment variable first.[/red]")
+        console.print("[dim]Get your key at https://console.anthropic.com/settings/keys[/dim]")
+        return
+
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+
+    if retag:
+        rows = db.conn.execute("""
+            SELECT path, name, extension, size_bytes, category, content_text
+            FROM files ORDER BY size_bytes DESC LIMIT ?
+        """, [limit]).fetchall()
+        files = [
+            {"path": r[0], "name": r[1], "extension": r[2],
+             "size_bytes": r[3], "category": r[4], "content_text": r[5]}
+            for r in rows
+        ]
+    else:
+        files = db.get_untagged_files(limit=limit)
+
+    if not files:
+        console.print("[green]All files are already tagged![/green]")
+        db.close()
+        return
+
+    console.print(f"\n[bold blue]Classifying {len(files)} files with AI...[/bold blue]")
+
+    from tqdm import tqdm
+    tag_map = {}
+    batch_size = 20
+
+    progress = tqdm(total=len(files), desc="Tagging", unit="files")
+    for i in range(0, len(files), batch_size):
+        batch = files[i:i + batch_size]
+        try:
+            batch_result = classify_batch(batch, model=model, batch_size=batch_size)
+            tag_map.update(batch_result)
+        except Exception as e:
+            console.print(f"[yellow]Batch error (skipping): {e}[/yellow]")
+        progress.update(len(batch))
+    progress.close()
+
+    # Save to database
+    updated = db.batch_update_tags(tag_map)
+    console.print(f"\n[green]Tagged {updated} files successfully.[/green]")
+
+    # Show tag summary
+    all_tags = db.get_all_tags()
+    if all_tags:
+        tag_table = Table(title="Tag Summary (Top 20)")
+        tag_table.add_column("Tag", style="cyan")
+        tag_table.add_column("Files", style="green", justify="right")
+
+        for tag_name, count in list(all_tags.items())[:20]:
+            tag_table.add_row(tag_name, f"{count:,}")
+
+        console.print(tag_table)
+
+    db.close()
+
+
+@app.command()
+def ask(
+    query: str = typer.Argument(..., help="Natural language question about your files"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    model: str = typer.Option("claude-sonnet-4-20250514", "--model", "-m", help="Claude model to use"),
+    show_sql: bool = typer.Option(False, "--show-sql", help="Show the generated SQL query"),
+):
+    """Ask questions about your files in plain English (requires ANTHROPIC_API_KEY)."""
+    try:
+        from src.ai import nl_to_sql, is_ai_available
+    except ImportError:
+        console.print("[red]AI features require: pip install 'doc-intelligence[ai]'[/red]")
+        return
+
+    if not is_ai_available():
+        console.print("[red]Set ANTHROPIC_API_KEY environment variable first.[/red]")
+        return
+
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+
+    console.print(f"\n[dim]Interpreting: \"{query}\"[/dim]")
+
+    try:
+        sql = nl_to_sql(query, model=model)
+    except Exception as e:
+        console.print(f"[red]Failed to generate query: {e}[/red]")
+        db.close()
+        return
+
+    if show_sql:
+        console.print(f"[dim]SQL: {sql}[/dim]\n")
+
+    try:
+        results = db.run_query(sql)
+    except (ValueError, RuntimeError) as e:
+        console.print(f"[red]{e}[/red]")
+        db.close()
+        return
+
+    if not results:
+        console.print("[yellow]No results found.[/yellow]")
+        db.close()
+        return
+
+    # Display results in a table
+    from src.utils import format_size as _fmt
+
+    table = Table(title=f"Results ({len(results)} rows)")
+    columns = list(results[0].keys())
+
+    for col in columns:
+        table.add_column(col, style="cyan" if col in ("name", "path") else "white")
+
+    for row in results[:100]:
+        values = []
+        for col in columns:
+            val = row[col]
+            # Format size columns
+            if col in ("size_bytes", "total_size", "wasted_size") and isinstance(val, (int, float)):
+                values.append(_fmt(int(val)))
+            elif val is None:
+                values.append("-")
+            else:
+                s = str(val)
+                if len(s) > 80:
+                    s = s[:77] + "..."
+                values.append(s)
+        table.add_row(*values)
+
+    console.print(table)
+    db.close()
+
+
+@app.command()
+def health(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    ai_insights: bool = typer.Option(False, "--ai", help="Add AI-powered analysis (requires ANTHROPIC_API_KEY)"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Save report to file"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON instead of text"),
+):
+    """Generate a file system health report with scoring and recommendations."""
+    import json as _json
+
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+    metrics = db.get_health_metrics()
+
+    from src.health import compute_health_score, generate_health_text
+
+    health_data = compute_health_score(metrics)
+
+    # Optionally enhance with AI
+    if ai_insights:
+        try:
+            from src.ai import generate_health_insights, is_ai_available
+            if is_ai_available():
+                console.print("[dim]Getting AI health insights...[/dim]")
+                ai_health = generate_health_insights(metrics)
+                # Merge AI insights (AI takes priority for score/grade/summary)
+                health_data["ai_score"] = ai_health.get("score", health_data["score"])
+                health_data["ai_grade"] = ai_health.get("grade", health_data["grade"])
+                health_data["ai_summary"] = ai_health.get("summary", "")
+                # Append AI issues and recommendations
+                health_data["issues"].extend(ai_health.get("issues", []))
+                health_data["recommendations"].extend(ai_health.get("recommendations", []))
+            else:
+                console.print("[yellow]AI not available (missing API key or package).[/yellow]")
+        except Exception as e:
+            console.print(f"[yellow]AI insights failed: {e}[/yellow]")
+
+    if json_output:
+        print(_json.dumps({"metrics": metrics, "health": health_data}, indent=2, default=str))
+    else:
+        report_text = generate_health_text(metrics, health_data)
+        console.print(report_text)
+
+        # Show AI insights if present
+        if health_data.get("ai_summary"):
+            console.print(f"\n[bold blue]AI Analysis:[/bold blue]")
+            console.print(f"  Score: {health_data['ai_score']}/100 (Grade: {health_data['ai_grade']})")
+            console.print(f"  {health_data['ai_summary']}")
+
+    if output:
+        out_path = Path(output)
+        if json_output:
+            out_path.write_text(
+                _json.dumps({"metrics": metrics, "health": health_data}, indent=2, default=str)
+            )
+        else:
+            out_path.write_text(generate_health_text(metrics, health_data))
+        console.print(f"\n[green]Report saved to {out_path.resolve()}[/green]")
+
+    db.close()
+
+
+@app.command()
+def tags(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    tag_name: Optional[str] = typer.Argument(None, help="Show files for a specific tag"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max files to show"),
+):
+    """Browse tags and tagged files."""
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+
+    if tag_name:
+        # Show files for a specific tag
+        files = db.get_files_by_tag(tag_name, limit=limit)
+        if not files:
+            console.print(f"[yellow]No files found with tag '{tag_name}'.[/yellow]")
+            db.close()
+            return
+
+        table = Table(title=f"Files tagged '{tag_name}' ({len(files)} results)")
+        table.add_column("Name", style="cyan")
+        table.add_column("Size", style="green", width=10)
+        table.add_column("Category", style="yellow")
+        table.add_column("Tags", style="dim")
+        table.add_column("Path", style="white")
+
+        from src.utils import format_size as _fmt
+        for f in files:
+            path_display = f["path"]
+            if len(path_display) > 50:
+                path_display = "..." + path_display[-47:]
+            table.add_row(
+                f["name"], _fmt(f["size_bytes"]),
+                f["category"] or "-",
+                ", ".join(f["tags"][:3]),
+                path_display,
+            )
+        console.print(table)
+    else:
+        # Show all tags
+        all_tags = db.get_all_tags()
+        if not all_tags:
+            console.print("[yellow]No tags found. Run 'doc-intelligence tag' to classify files.[/yellow]")
+            db.close()
+            return
+
+        table = Table(title=f"All Tags ({len(all_tags)} unique)")
+        table.add_column("Tag", style="cyan")
+        table.add_column("Files", style="green", justify="right")
+
+        for tag_name_item, count in all_tags.items():
+            table.add_row(tag_name_item, f"{count:,}")
+
+        console.print(table)
+        console.print(f"\n[dim]Use 'doc-intelligence tags <tag-name>' to see files for a tag.[/dim]")
+
+    db.close()
 
 
 @app.command()

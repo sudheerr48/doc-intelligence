@@ -50,3 +50,9 @@ staging:
 # Output
 reports:
   output_dir: ./data/reports
+
+# AI-powered features (requires ANTHROPIC_API_KEY env var)
+ai:
+  model: claude-sonnet-4-20250514       # Claude model for AI features
+  batch_size: 20                # Files per API call for tagging
+  max_tag_files: 500            # Max files to tag per run

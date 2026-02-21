@@ -3,6 +3,7 @@ Storage Module
 DuckDB operations for file metadata storage.
 """
 
+import json
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -44,13 +45,15 @@ class FileDatabase:
             )
         """)
 
-        # Migrate existing databases: add content_text column if missing
+        # Migrate existing databases: add missing columns
         columns = {
             row[0] for row in
             self.conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'files'").fetchall()
         }
         if "content_text" not in columns:
             self.conn.execute("ALTER TABLE files ADD COLUMN content_text VARCHAR")
+        if "tags" not in columns:
+            self.conn.execute("ALTER TABLE files ADD COLUMN tags VARCHAR")
 
         # Index for fast duplicate lookups
         self.conn.execute("""
@@ -306,6 +309,243 @@ class FileDatabase:
         ).fetchall()
         return {row[0] for row in rows}
     
+    def update_tags(self, path: str, tags: list[str]) -> bool:
+        """
+        Update tags for a file.
+
+        Args:
+            path: File path (primary key)
+            tags: List of tag strings
+
+        Returns:
+            True if updated, False if error
+        """
+        try:
+            tags_json = json.dumps(tags)
+            self.conn.execute(
+                "UPDATE files SET tags = ? WHERE path = ?",
+                [tags_json, path]
+            )
+            return True
+        except Exception:
+            return False
+
+    def batch_update_tags(self, tag_map: dict[str, list[str]]) -> int:
+        """
+        Update tags for multiple files.
+
+        Args:
+            tag_map: Dict mapping path -> list of tags
+
+        Returns:
+            Number of files updated
+        """
+        count = 0
+        for path, tags in tag_map.items():
+            if self.update_tags(path, tags):
+                count += 1
+        return count
+
+    def get_all_tags(self) -> dict[str, int]:
+        """
+        Get all unique tags with their file counts.
+
+        Returns:
+            Dict mapping tag -> count
+        """
+        rows = self.conn.execute("""
+            SELECT tags FROM files WHERE tags IS NOT NULL AND tags != '[]'
+        """).fetchall()
+
+        tag_counts: dict[str, int] = {}
+        for (tags_json,) in rows:
+            try:
+                tags = json.loads(tags_json)
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return dict(sorted(tag_counts.items(), key=lambda x: x[1], reverse=True))
+
+    def get_files_by_tag(self, tag: str, limit: int = 100) -> list[dict]:
+        """
+        Get all files matching a tag.
+
+        Args:
+            tag: Tag to search for
+            limit: Maximum results
+
+        Returns:
+            List of matching file dicts
+        """
+        rows = self.conn.execute("""
+            SELECT path, name, extension, size_bytes, category, tags
+            FROM files
+            WHERE tags IS NOT NULL AND tags LIKE ?
+            ORDER BY size_bytes DESC
+            LIMIT ?
+        """, [f'%"{tag}"%', limit]).fetchall()
+
+        return [
+            {
+                "path": r[0], "name": r[1], "extension": r[2],
+                "size_bytes": r[3], "category": r[4],
+                "tags": json.loads(r[5]) if r[5] else [],
+            }
+            for r in rows
+        ]
+
+    def get_untagged_files(self, limit: int = 500) -> list[dict]:
+        """Get files that haven't been tagged yet."""
+        rows = self.conn.execute("""
+            SELECT path, name, extension, size_bytes, category, content_text
+            FROM files
+            WHERE tags IS NULL OR tags = '[]'
+            ORDER BY size_bytes DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        return [
+            {
+                "path": r[0], "name": r[1], "extension": r[2],
+                "size_bytes": r[3], "category": r[4],
+                "content_text": r[5],
+            }
+            for r in rows
+        ]
+
+    def run_query(self, sql: str, params: list = None) -> list[dict]:
+        """
+        Execute a read-only SQL query and return results as dicts.
+        Used by natural language query engine.
+
+        Args:
+            sql: SQL query (SELECT only)
+            params: Optional query parameters
+
+        Returns:
+            List of result rows as dicts
+        """
+        sql_stripped = sql.strip().upper()
+        if not sql_stripped.startswith("SELECT"):
+            raise ValueError("Only SELECT queries are allowed")
+
+        # Block dangerous operations
+        for keyword in ("DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "TRUNCATE"):
+            if keyword in sql_stripped:
+                raise ValueError(f"Query contains forbidden keyword: {keyword}")
+
+        try:
+            if params:
+                result = self.conn.execute(sql, params)
+            else:
+                result = self.conn.execute(sql)
+
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            raise RuntimeError(f"Query execution failed: {e}")
+
+    def get_health_metrics(self) -> dict:
+        """
+        Compute file system health metrics.
+
+        Returns:
+            Dict with health metrics for reporting
+        """
+        stats = self.get_stats()
+        duplicates = self.get_duplicates()
+
+        total_wasted = sum(d["wasted_size"] for d in duplicates)
+        total_dup_files = sum(d["count"] for d in duplicates)
+
+        # Stale files (not modified in 365+ days)
+        stale_result = self.conn.execute("""
+            SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+            FROM files
+            WHERE modified_at < CURRENT_TIMESTAMP - INTERVAL '365 days'
+        """).fetchone()
+        stale_count = stale_result[0]
+        stale_size = stale_result[1]
+
+        # Large files (> 100MB)
+        large_result = self.conn.execute("""
+            SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+            FROM files
+            WHERE size_bytes > 104857600
+        """).fetchone()
+        large_count = large_result[0]
+        large_size = large_result[1]
+
+        # Top 10 largest files
+        top_large = self.conn.execute("""
+            SELECT path, name, size_bytes, extension, category
+            FROM files ORDER BY size_bytes DESC LIMIT 10
+        """).fetchall()
+
+        # New files (added in last 7 days based on scanned_at)
+        new_result = self.conn.execute("""
+            SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
+            FROM files
+            WHERE scanned_at > CURRENT_TIMESTAMP - INTERVAL '7 days'
+        """).fetchone()
+
+        # Extension diversity
+        ext_count = self.conn.execute(
+            "SELECT COUNT(DISTINCT extension) FROM files"
+        ).fetchone()[0]
+
+        # Category breakdown with sizes
+        category_breakdown = self.conn.execute("""
+            SELECT category, COUNT(*) as files, SUM(size_bytes) as total_size
+            FROM files GROUP BY category ORDER BY total_size DESC
+        """).fetchall()
+
+        # Top 10 duplicate groups
+        top_dups = []
+        for d in duplicates[:10]:
+            size_each = d["total_size"] // d["count"]
+            top_dups.append({
+                "count": d["count"],
+                "size_each": size_each,
+                "wasted": d["wasted_size"],
+                "sample": Path(d["paths"][0]).name if d["paths"] else "",
+            })
+
+        # Tagged vs untagged
+        tagged_result = self.conn.execute("""
+            SELECT COUNT(*) FROM files WHERE tags IS NOT NULL AND tags != '[]'
+        """).fetchone()
+        tagged_count = tagged_result[0]
+
+        return {
+            "total_files": stats["total_files"],
+            "total_size": stats["total_size_bytes"],
+            "duplicate_sets": len(duplicates),
+            "duplicate_files": total_dup_files,
+            "wasted_by_duplicates": total_wasted,
+            "stale_files": stale_count,
+            "stale_size": stale_size,
+            "large_files": large_count,
+            "large_size": large_size,
+            "top_large_files": [
+                {"path": r[0], "name": r[1], "size": r[2], "ext": r[3], "category": r[4]}
+                for r in top_large
+            ],
+            "new_files_7d": new_result[0],
+            "new_size_7d": new_result[1],
+            "extension_types": ext_count,
+            "category_breakdown": [
+                {"category": r[0] or "unknown", "files": r[1], "size": r[2]}
+                for r in category_breakdown
+            ],
+            "top_duplicates": top_dups,
+            "tagged_files": tagged_count,
+            "untagged_files": stats["total_files"] - tagged_count,
+            "by_extension": stats["by_extension"],
+        }
+
     def remove_missing_files(self, valid_paths: set, category: str) -> int:
         """
         Remove files from DB that no longer exist on disk.
