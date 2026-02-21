@@ -399,6 +399,104 @@ def _parse_batch_tags(text: str) -> dict[str, list[str]]:
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Embedding models
+# ---------------------------------------------------------------------------
+
+DEFAULT_EMBEDDING_MODELS = {
+    "anthropic": "voyage-3",  # via Anthropic's Voyage partnership
+    "openai": "text-embedding-3-small",
+}
+
+_embedding_client = None
+
+
+def _get_embedding_client():
+    """Get or create the embedding client (lazy init, always uses OpenAI-compatible API)."""
+    global _embedding_client
+    if _embedding_client is not None:
+        return _embedding_client
+
+    provider = get_provider()
+
+    if provider == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set.")
+        try:
+            import openai
+        except ImportError:
+            raise ImportError("openai package not installed.\nInstall with: pip install 'doc-intelligence[openai]'")
+        _embedding_client = openai.OpenAI(api_key=api_key)
+
+    elif provider == "anthropic":
+        # Anthropic doesn't have a native embeddings API;
+        # check if OpenAI key is also available as fallback
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            try:
+                import openai
+                _embedding_client = openai.OpenAI(api_key=openai_key)
+            except ImportError:
+                raise ImportError("openai package not installed.\nInstall with: pip install 'doc-intelligence[openai]'")
+        else:
+            raise RuntimeError(
+                "Semantic search requires an embedding model.\n"
+                "Set OPENAI_API_KEY for embeddings (works alongside ANTHROPIC_API_KEY for other features)."
+            )
+
+    return _embedding_client
+
+
+def generate_embeddings(
+    texts: list[str],
+    model: Optional[str] = None,
+    batch_size: int = 100,
+) -> list[list[float]]:
+    """
+    Generate embeddings for a list of texts using OpenAI's API.
+
+    Args:
+        texts: List of text strings to embed
+        model: Embedding model name (default: text-embedding-3-small)
+        batch_size: Texts per API call
+
+    Returns:
+        List of embedding vectors (list of floats)
+    """
+    client = _get_embedding_client()
+    if model is None:
+        provider = get_provider()
+        model = DEFAULT_EMBEDDING_MODELS.get(provider, "text-embedding-3-small")
+        # If using anthropic provider with OpenAI fallback, use OpenAI's model
+        if provider == "anthropic":
+            model = "text-embedding-3-small"
+
+    all_embeddings: list[list[float]] = []
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        # Truncate very long texts to avoid token limits
+        batch = [t[:8000] if len(t) > 8000 else t for t in batch]
+
+        response = client.embeddings.create(model=model, input=batch)
+        batch_embeddings = [item.embedding for item in response.data]
+        all_embeddings.extend(batch_embeddings)
+
+    return all_embeddings
+
+
+def is_embedding_available() -> bool:
+    """Check if embedding features are available (needs OpenAI key + package)."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        return False
+    try:
+        import openai  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def is_ai_available() -> bool:
     """Check if AI features are available (API key set and package installed)."""
     # Check Anthropic

@@ -8,7 +8,10 @@ from datetime import datetime
 
 import pytest
 
-from src.extractors import extract_text, _extract_pdf, _extract_plaintext, MAX_TEXT_LENGTH
+from src.extractors import (
+    extract_text, _extract_pdf, _extract_plaintext,
+    _extract_docx, _extract_xlsx, MAX_TEXT_LENGTH,
+)
 from src.scanner import FileInfo
 from src.storage import FileDatabase
 
@@ -153,6 +156,148 @@ class TestExtractPDF:
 
     def test_returns_none_for_nonexistent_pdf(self):
         assert _extract_pdf("/nonexistent/file.pdf") is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_docx
+# ---------------------------------------------------------------------------
+
+class TestExtractDocx:
+    """Tests for DOCX text extraction."""
+
+    def test_extracts_from_docx(self, tmp_path):
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Hello from DOCX")
+        doc.add_paragraph("This is paragraph two.")
+        docx_path = tmp_path / "test.docx"
+        doc.save(str(docx_path))
+
+        result = _extract_docx(str(docx_path))
+        assert result is not None
+        assert "Hello from DOCX" in result
+        assert "paragraph two" in result
+
+    def test_extracts_tables_from_docx(self, tmp_path):
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Header text")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Name"
+        table.cell(0, 1).text = "Value"
+        table.cell(1, 0).text = "Alpha"
+        table.cell(1, 1).text = "100"
+        docx_path = tmp_path / "table.docx"
+        doc.save(str(docx_path))
+
+        result = _extract_docx(str(docx_path))
+        assert result is not None
+        assert "Name" in result
+        assert "Alpha" in result
+
+    def test_returns_none_for_empty_docx(self, tmp_path):
+        from docx import Document
+
+        doc = Document()
+        docx_path = tmp_path / "empty.docx"
+        doc.save(str(docx_path))
+
+        result = _extract_docx(str(docx_path))
+        assert result is None
+
+    def test_returns_none_for_corrupted_docx(self, tmp_path):
+        f = tmp_path / "bad.docx"
+        f.write_bytes(b"not a real docx")
+        assert _extract_docx(str(f)) is None
+
+    def test_extract_text_dispatches_docx(self, tmp_path):
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Dispatch test")
+        docx_path = tmp_path / "dispatch.docx"
+        doc.save(str(docx_path))
+
+        result = extract_text(str(docx_path))
+        assert result is not None
+        assert "Dispatch test" in result
+
+
+# ---------------------------------------------------------------------------
+# _extract_xlsx
+# ---------------------------------------------------------------------------
+
+class TestExtractXlsx:
+    """Tests for XLSX text extraction."""
+
+    def test_extracts_from_xlsx(self, tmp_path):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Data"
+        ws.append(["Name", "Score"])
+        ws.append(["Alice", 95])
+        ws.append(["Bob", 87])
+        xlsx_path = tmp_path / "test.xlsx"
+        wb.save(str(xlsx_path))
+
+        result = _extract_xlsx(str(xlsx_path))
+        assert result is not None
+        assert "Alice" in result
+        assert "95" in result
+        assert "[Sheet: Data]" in result
+
+    def test_extracts_multiple_sheets(self, tmp_path):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws1 = wb.active
+        ws1.title = "Sheet1"
+        ws1.append(["Revenue", "1000"])
+        ws2 = wb.create_sheet("Sheet2")
+        ws2.append(["Expenses", "500"])
+        xlsx_path = tmp_path / "multi.xlsx"
+        wb.save(str(xlsx_path))
+
+        result = _extract_xlsx(str(xlsx_path))
+        assert result is not None
+        assert "Revenue" in result
+        assert "Expenses" in result
+        assert "[Sheet: Sheet1]" in result
+        assert "[Sheet: Sheet2]" in result
+
+    def test_returns_none_for_empty_xlsx(self, tmp_path):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        # Empty sheet, no data
+        xlsx_path = tmp_path / "empty.xlsx"
+        wb.save(str(xlsx_path))
+
+        result = _extract_xlsx(str(xlsx_path))
+        assert result is None
+
+    def test_returns_none_for_corrupted_xlsx(self, tmp_path):
+        f = tmp_path / "bad.xlsx"
+        f.write_bytes(b"not a real xlsx")
+        assert _extract_xlsx(str(f)) is None
+
+    def test_extract_text_dispatches_xlsx(self, tmp_path):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["dispatch", "test"])
+        xlsx_path = tmp_path / "dispatch.xlsx"
+        wb.save(str(xlsx_path))
+
+        result = extract_text(str(xlsx_path))
+        assert result is not None
+        assert "dispatch" in result
 
 
 # ---------------------------------------------------------------------------

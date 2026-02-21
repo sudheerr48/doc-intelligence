@@ -62,3 +62,9 @@ ai:
     model: gpt-4o                       # Default OpenAI model
   batch_size: 20                        # Files per API call for tagging
   max_tag_files: 500                    # Max files to tag per run
+
+# Semantic search (requires OPENAI_API_KEY for embeddings)
+embeddings:
+  model: text-embedding-3-small         # OpenAI embedding model
+  batch_size: 100                       # Texts per API call
+  max_files: 500                        # Max files to embed per run

@@ -4,6 +4,7 @@ DuckDB operations for file metadata storage.
 """
 
 import json
+import struct
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -65,6 +66,17 @@ class FileDatabase:
         self.conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_extension
             ON files(extension)
+        """)
+
+        # Embeddings table for semantic search
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                path VARCHAR PRIMARY KEY,
+                embedding BLOB,
+                model VARCHAR,
+                embedded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (path) REFERENCES files(path)
+            )
         """)
     
     def insert_file(self, file_info: FileInfo) -> bool:
@@ -566,6 +578,122 @@ class FileDatabase:
         
         return len(missing)
     
+    # ------------------------------------------------------------------
+    # Embedding / semantic search methods
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _encode_embedding(vec: list[float]) -> bytes:
+        """Encode a float vector to compact binary (little-endian float32)."""
+        return struct.pack(f"<{len(vec)}f", *vec)
+
+    @staticmethod
+    def _decode_embedding(blob: bytes) -> list[float]:
+        """Decode a binary blob back to a float vector."""
+        n = len(blob) // 4
+        return list(struct.unpack(f"<{n}f", blob))
+
+    def store_embedding(self, path: str, embedding: list[float], model: str) -> bool:
+        """Store an embedding vector for a file."""
+        try:
+            blob = self._encode_embedding(embedding)
+            self.conn.execute("DELETE FROM embeddings WHERE path = ?", [path])
+            self.conn.execute(
+                "INSERT INTO embeddings (path, embedding, model) VALUES (?, ?, ?)",
+                [path, blob, model],
+            )
+            return True
+        except Exception:
+            return False
+
+    def store_embeddings_batch(
+        self, items: list[tuple[str, list[float]]], model: str
+    ) -> int:
+        """Store embeddings for multiple files. Returns count stored."""
+        count = 0
+        for path, vec in items:
+            if self.store_embedding(path, vec, model):
+                count += 1
+        return count
+
+    def get_unembedded_files(self, limit: int = 500) -> list[dict]:
+        """Get files that have content_text but no embedding yet."""
+        rows = self.conn.execute("""
+            SELECT f.path, f.name, f.extension, f.size_bytes, f.content_text, f.tags
+            FROM files f
+            LEFT JOIN embeddings e ON f.path = e.path
+            WHERE f.content_text IS NOT NULL
+              AND LENGTH(f.content_text) > 0
+              AND e.path IS NULL
+            ORDER BY f.size_bytes DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        return [
+            {
+                "path": r[0], "name": r[1], "extension": r[2],
+                "size_bytes": r[3], "content_text": r[4], "tags": r[5],
+            }
+            for r in rows
+        ]
+
+    def semantic_search(self, query_embedding: list[float], limit: int = 20) -> list[dict]:
+        """
+        Find files most similar to a query embedding using cosine similarity.
+        Computes similarity in Python since DuckDB doesn't have native vector ops.
+
+        Args:
+            query_embedding: The query vector
+            limit: Max results
+
+        Returns:
+            List of dicts with path, name, similarity score, etc.
+        """
+        rows = self.conn.execute("""
+            SELECT e.path, e.embedding, f.name, f.extension,
+                   f.size_bytes, f.category, f.tags
+            FROM embeddings e
+            JOIN files f ON e.path = f.path
+        """).fetchall()
+
+        if not rows:
+            return []
+
+        # Compute cosine similarity for each stored embedding
+        import math
+        q_norm = math.sqrt(sum(x * x for x in query_embedding))
+        if q_norm == 0:
+            return []
+
+        scored = []
+        for row in rows:
+            vec = self._decode_embedding(row[1])
+            dot = sum(a * b for a, b in zip(query_embedding, vec))
+            v_norm = math.sqrt(sum(x * x for x in vec))
+            if v_norm == 0:
+                continue
+            similarity = dot / (q_norm * v_norm)
+            scored.append({
+                "path": row[0],
+                "name": row[2],
+                "extension": row[3],
+                "size_bytes": row[4],
+                "category": row[5],
+                "tags": row[6],
+                "similarity": round(similarity, 4),
+            })
+
+        scored.sort(key=lambda x: x["similarity"], reverse=True)
+        return scored[:limit]
+
+    def get_embedding_stats(self) -> dict:
+        """Get statistics about stored embeddings."""
+        total = self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+        with_content = self.conn.execute(
+            "SELECT COUNT(*) FROM files WHERE content_text IS NOT NULL AND LENGTH(content_text) > 0"
+        ).fetchone()[0]
+        return {"embedded_files": total, "files_with_content": with_content}
+
     def close(self):
         """Close database connection."""
         self.conn.close()

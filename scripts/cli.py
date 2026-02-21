@@ -20,8 +20,11 @@ Usage:
     doc-intelligence tags [TAG]         # Browse tags
     doc-intelligence ask QUERY          # Natural language queries
     doc-intelligence health [OPTIONS]   # File system health report
+    doc-intelligence embed [OPTIONS]    # Generate embeddings for semantic search
+    doc-intelligence semantic-search Q  # Search files by meaning
 """
 
+import json
 import sys
 import subprocess
 from pathlib import Path
@@ -29,6 +32,13 @@ from typing import Optional
 
 # Add src to path for direct script execution
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 import typer
 from rich.console import Console
@@ -618,6 +628,171 @@ def tags(
         console.print(table)
         console.print(f"\n[dim]Use 'doc-intelligence tags <tag-name>' to see files for a tag.[/dim]")
 
+    db.close()
+
+
+@app.command()
+def embed(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(500, "--limit", "-l", help="Max files to embed per run"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Embedding model (default: text-embedding-3-small)"),
+):
+    """Generate embeddings for semantic search (requires OPENAI_API_KEY)."""
+    try:
+        from src.ai import generate_embeddings, is_embedding_available
+    except ImportError:
+        console.print("[red]Embedding features require: pip install 'doc-intelligence[openai]'[/red]")
+        return
+
+    if not is_embedding_available():
+        console.print("[red]Set OPENAI_API_KEY for embedding generation.[/red]")
+        console.print("[dim]Get your key at https://platform.openai.com/api-keys[/dim]")
+        return
+
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+    files = db.get_unembedded_files(limit=limit)
+
+    if not files:
+        stats = db.get_embedding_stats()
+        console.print(f"[green]All files with content are already embedded ({stats['embedded_files']} total).[/green]")
+        db.close()
+        return
+
+    console.print(f"\n[bold blue]Generating embeddings for {len(files)} files...[/bold blue]")
+
+    # Build text representations for embedding
+    texts = []
+    paths = []
+    for f in files:
+        # Combine name, tags, and content for richer embeddings
+        parts = [f["name"]]
+        if f.get("tags"):
+            try:
+                tag_list = json.loads(f["tags"]) if isinstance(f["tags"], str) else f["tags"]
+                parts.append("Tags: " + ", ".join(tag_list))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if f.get("content_text"):
+            parts.append(f["content_text"][:4000])
+        texts.append("\n".join(parts))
+        paths.append(f["path"])
+
+    from tqdm import tqdm
+
+    embedding_model = model or "text-embedding-3-small"
+    batch_size = 100
+    stored = 0
+
+    progress = tqdm(total=len(texts), desc="Embedding", unit="files")
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i:i + batch_size]
+        batch_paths = paths[i:i + batch_size]
+        try:
+            vecs = generate_embeddings(batch_texts, model=embedding_model, batch_size=batch_size)
+            items = list(zip(batch_paths, vecs))
+            stored += db.store_embeddings_batch(items, model=embedding_model)
+        except Exception as e:
+            console.print(f"[yellow]Batch error (skipping): {e}[/yellow]")
+        progress.update(len(batch_texts))
+    progress.close()
+
+    stats = db.get_embedding_stats()
+    console.print(f"\n[green]Embedded {stored} files. Total: {stats['embedded_files']}/{stats['files_with_content']} files with content.[/green]")
+    db.close()
+
+
+@app.command("semantic-search")
+def semantic_search(
+    query: str = typer.Argument(..., help="Natural language query to search by meaning"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
+    threshold: float = typer.Option(0.3, "--threshold", "-t", help="Minimum similarity score (0-1)"),
+):
+    """Search files by meaning using embeddings (requires OPENAI_API_KEY)."""
+    try:
+        from src.ai import generate_embeddings, is_embedding_available
+    except ImportError:
+        console.print("[red]Semantic search requires: pip install 'doc-intelligence[openai]'[/red]")
+        return
+
+    if not is_embedding_available():
+        console.print("[red]Set OPENAI_API_KEY for semantic search.[/red]")
+        return
+
+    cfg = load_config(config)
+    db_path = Path(cfg["database"]["path"]).expanduser()
+
+    if not db_path.exists():
+        console.print("[red]Database not found. Run 'doc-intelligence scan' first.[/red]")
+        return
+
+    db = FileDatabase(str(db_path))
+    stats = db.get_embedding_stats()
+
+    if stats["embedded_files"] == 0:
+        console.print("[yellow]No embeddings found. Run 'doc-intelligence embed' first.[/yellow]")
+        db.close()
+        return
+
+    console.print(f"[dim]Searching {stats['embedded_files']} embedded files for: \"{query}\"[/dim]")
+
+    # Generate embedding for the query
+    try:
+        query_vec = generate_embeddings([query])[0]
+    except Exception as e:
+        console.print(f"[red]Failed to generate query embedding: {e}[/red]")
+        db.close()
+        return
+
+    results = db.semantic_search(query_vec, limit=limit)
+
+    # Filter by threshold
+    results = [r for r in results if r["similarity"] >= threshold]
+
+    if not results:
+        console.print("[yellow]No similar files found above the threshold.[/yellow]")
+        db.close()
+        return
+
+    from src.utils import format_size as _fmt
+    import json as _json
+
+    table = Table(title=f"Semantic Search Results ({len(results)} matches)")
+    table.add_column("Score", style="green", width=7, justify="right")
+    table.add_column("Name", style="cyan")
+    table.add_column("Size", style="white", width=10)
+    table.add_column("Tags", style="dim", width=25)
+    table.add_column("Path", style="white")
+
+    for r in results:
+        tags_str = ""
+        if r.get("tags"):
+            try:
+                tag_list = _json.loads(r["tags"]) if isinstance(r["tags"], str) else []
+                tags_str = ", ".join(tag_list[:3])
+            except (TypeError, _json.JSONDecodeError):
+                pass
+
+        path_display = r["path"]
+        if len(path_display) > 45:
+            path_display = "..." + path_display[-42:]
+
+        table.add_row(
+            f"{r['similarity']:.3f}",
+            r["name"],
+            _fmt(r["size_bytes"]),
+            tags_str,
+            path_display,
+        )
+
+    console.print(table)
     db.close()
 
 
