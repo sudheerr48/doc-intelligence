@@ -65,6 +65,7 @@ PAGES = {
     "Health": "health",
     "Search": "search",
     "Analytics": "analytics",
+    "Git Branches": "git_branches",
     "Settings": "settings",
 }
 
@@ -76,6 +77,7 @@ PAGE_ICONS = {
     "Health": "🩺",
     "Search": "🔍",
     "Analytics": "📈",
+    "Git Branches": "🌿",
     "Settings": "⚙️",
 }
 
@@ -136,6 +138,8 @@ elif page_key == "search":
     from src.dashboard.pages.search import render
 elif page_key == "analytics":
     from src.dashboard.pages.analytics import render
+elif page_key == "git_branches":
+    from src.dashboard.pages.git_branches import render
 elif page_key == "settings":
     from src.dashboard.pages.settings import render
 
