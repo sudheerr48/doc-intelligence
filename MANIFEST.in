@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include PRIVACY.md
+include SECURITY.md
+include pyproject.toml
+recursive-include config *.yaml
+recursive-include src *.py
+recursive-include scripts *.py
+recursive-include docs/site *.html *.css *.svg
+prune tests
+prune test_data
+prune data
+prune .git

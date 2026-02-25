@@ -64,8 +64,12 @@ PAGES = {
     "Tags": "tags",
     "Health": "health",
     "Search": "search",
+    "PII Scanner": "pii",
+    "Suggestions": "suggestions",
+    "Images": "images",
     "Analytics": "analytics",
     "Git Branches": "git_branches",
+    "License": "license",
     "Settings": "settings",
 }
 
@@ -76,14 +80,18 @@ PAGE_ICONS = {
     "Tags": "🏷️",
     "Health": "🩺",
     "Search": "🔍",
+    "PII Scanner": "🛡️",
+    "Suggestions": "💡",
+    "Images": "🖼️",
     "Analytics": "📈",
     "Git Branches": "🌿",
+    "License": "🔑",
     "Settings": "⚙️",
 }
 
 with st.sidebar:
     st.title("📁 Doc Intelligence")
-    st.caption("AI-powered file intelligence")
+    st.caption("Your files, understood.")
     st.divider()
 
     selected_page = st.radio(
@@ -94,7 +102,8 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption("v5.0 — Local & Private")
+    st.caption("v5.0 — 100% Local & Private")
+    st.caption("🔒 Your files never leave your machine")
 
 # ------------------------------------------------------------------
 # Load database
@@ -136,10 +145,18 @@ elif page_key == "health":
     from src.dashboard.pages.health import render
 elif page_key == "search":
     from src.dashboard.pages.search import render
+elif page_key == "pii":
+    from src.dashboard.pages.pii import render
+elif page_key == "suggestions":
+    from src.dashboard.pages.suggestions import render
+elif page_key == "images":
+    from src.dashboard.pages.images import render
 elif page_key == "analytics":
     from src.dashboard.pages.analytics import render
 elif page_key == "git_branches":
     from src.dashboard.pages.git_branches import render
+elif page_key == "license":
+    from src.dashboard.pages.license import render
 elif page_key == "settings":
     from src.dashboard.pages.settings import render
 

@@ -1,5 +1,6 @@
 """
-AI package — LLM-powered classification, embeddings, queries, and health insights.
+AI package — LLM-powered classification, embeddings, queries, health insights,
+PII detection, smart suggestions, and image classification.
 
 Supported providers:
   - Anthropic Claude: pip install 'doc-intelligence[ai]' + ANTHROPIC_API_KEY
@@ -22,6 +23,9 @@ from .classification import classify_file, classify_batch
 from .embeddings import generate_embeddings
 from .query import nl_to_sql
 from .insights import generate_health_insights
+from .pii import scan_text, scan_files, scan_files_summary
+from .suggestions import suggest_organization
+from .image_classify import classify_image, classify_images_in_db, image_classification_summary
 
 __all__ = [
     "get_provider",
@@ -35,4 +39,14 @@ __all__ = [
     "generate_embeddings",
     "nl_to_sql",
     "generate_health_insights",
+    # PII detection
+    "scan_text",
+    "scan_files",
+    "scan_files_summary",
+    # Smart suggestions
+    "suggest_organization",
+    # Image classification
+    "classify_image",
+    "classify_images_in_db",
+    "image_classification_summary",
 ]

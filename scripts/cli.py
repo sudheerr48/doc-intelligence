@@ -60,7 +60,8 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 _BRAND = "Doc Intelligence"
-_VERSION = "4.0"
+_TAGLINE = "Your files, understood."
+_VERSION = "5.0"
 
 
 def _header(subtitle: str = ""):
@@ -135,10 +136,20 @@ def _severity_icon(sev: str) -> str:
 # App definition
 # ---------------------------------------------------------------------------
 
+_ASCII_LOGO = r"""
+  ____              ___       _       _ _
+ |  _ \  ___   ___ |_ _|_ __ | |_ ___| | |
+ | | | |/ _ \ / __| | || '_ \| __/ _ \ | |
+ | |_| | (_) | (__ | || | | | ||  __/ | |
+ |____/ \___/ \___|___|_| |_|\__\___|_|_|
+"""
+
 app = typer.Typer(
     name="doc-intelligence",
-    help=f"{_BRAND} v{_VERSION} — AI-powered file intelligence.\n\n"
-         "Persistent indexing, smart tagging, natural language queries, and health reports.\n\n"
+    help=f"{_BRAND} v{_VERSION} — {_TAGLINE}\n\n"
+         "AI-powered file intelligence. Persistent indexing, smart tagging,\n"
+         "PII detection, natural language queries, and health reports.\n\n"
+         "100% local & private. Your files never leave your machine.\n\n"
          "Run with no subcommand for interactive mode.",
     invoke_without_command=True,
 )
@@ -1110,11 +1121,389 @@ def providers_cmd(
 
 
 # ---------------------------------------------------------------------------
+# pii-scan
+# ---------------------------------------------------------------------------
+
+@app.command("pii-scan")
+def pii_scan(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(500, "--limit", "-l", help="Max files to scan"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Scan indexed files for PII (SSNs, credit cards, emails, phones)."""
+    from src.ai.pii import scan_files_summary
+
+    cfg, db = _open_db(config)
+    if db is None:
+        return
+
+    _header("PII Scanner")
+    console.print(f"  Scanning up to [bold]{limit}[/bold] files for sensitive data...\n")
+
+    with console.status("[cyan]Scanning for PII patterns...", spinner="dots"):
+        summary = scan_files_summary(db, limit=limit)
+
+    if json_output:
+        print(json.dumps(summary, indent=2, default=str))
+        db.close()
+        return
+
+    # Display results
+    _metric_row([
+        ("Files Scanned", f"{summary['files_scanned']:,}", "bold white"),
+        ("Files with PII", f"{summary['files_with_pii']:,}",
+         "bold red" if summary['files_with_pii'] else "bold green"),
+        ("Total Matches", f"{summary['total_matches']:,}",
+         "bold yellow" if summary['total_matches'] else "bold green"),
+    ])
+
+    risk = summary["risk_breakdown"]
+    if any(risk.values()):
+        console.print(Rule("[bold]Risk Breakdown[/bold]", style="bright_black"))
+        if risk.get("high"):
+            console.print(f"  [red]● High Risk[/red]: {risk['high']} files (SSNs, credit cards)")
+        if risk.get("medium"):
+            console.print(f"  [yellow]● Medium Risk[/yellow]: {risk['medium']} files (emails, phones)")
+        if risk.get("low"):
+            console.print(f"  [blue]● Low Risk[/blue]: {risk['low']} files (IPs, addresses)")
+        console.print()
+
+    if summary["type_counts"]:
+        console.print(Rule("[bold]PII Types Found[/bold]", style="bright_black"))
+        _bar_chart(
+            sorted(summary["type_counts"].items(), key=lambda x: x[1], reverse=True),
+            color="red",
+        )
+        console.print()
+
+    # Show high-risk files
+    if summary["high_risk_files"]:
+        console.print(Rule("[bold]High Risk Files[/bold]", style="red"))
+        for f in summary["high_risk_files"][:10]:
+            console.print(f"  [red]●[/red] [cyan]{Path(f['path']).name}[/cyan]  "
+                          f"[dim]{_truncate_path(f['path'], 50)}[/dim]")
+            for m in f["matches"][:3]:
+                console.print(f"    {m['type']}: [dim]{m['value']}[/dim]  (line {m.get('line', '?')})")
+        console.print()
+    elif summary['files_with_pii'] == 0:
+        console.print(Panel(
+            "[bold green]No PII detected in your files.[/bold green]",
+            border_style="green",
+        ))
+
+    console.print()
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# suggest
+# ---------------------------------------------------------------------------
+
+@app.command()
+def suggest(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max suggestions"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Get smart suggestions for organizing your files."""
+    from src.ai.suggestions import suggest_organization
+
+    cfg, db = _open_db(config)
+    if db is None:
+        return
+
+    _header("Smart Suggestions")
+
+    with console.status("[cyan]Analyzing your file organization...", spinner="dots"):
+        suggestions = suggest_organization(db, max_suggestions=limit)
+
+    if json_output:
+        print(json.dumps(suggestions, indent=2, default=str))
+        db.close()
+        return
+
+    if not suggestions:
+        console.print(Panel(
+            "[bold green]Your files are well organized![/bold green]",
+            border_style="green",
+        ))
+        db.close()
+        return
+
+    console.print(f"  Found [bold]{len(suggestions)}[/bold] suggestions:\n")
+
+    for i, s in enumerate(suggestions, 1):
+        priority_icon = {
+            "high": "[red]●[/red]",
+            "medium": "[yellow]●[/yellow]",
+            "low": "[blue]●[/blue]",
+        }.get(s.get("priority", "low"), "[dim]●[/dim]")
+
+        console.print(f"  {priority_icon} [bold]{i}. {s['title']}[/bold]")
+        console.print(f"    {s['description']}")
+        console.print(f"    [cyan]→ {s['suggestion']}[/cyan]")
+        if s.get("sample_files"):
+            for f in s["sample_files"][:3]:
+                console.print(f"      [dim]• {f}[/dim]")
+        console.print()
+
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# image-classify
+# ---------------------------------------------------------------------------
+
+@app.command("image-classify")
+def image_classify(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config YAML file"),
+    limit: int = typer.Option(500, "--limit", "-l", help="Max images to classify"),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Classify images as screenshots, photos, documents, etc."""
+    from src.ai.image_classify import image_classification_summary
+
+    cfg, db = _open_db(config)
+    if db is None:
+        return
+
+    _header("Image Classification")
+
+    with console.status("[cyan]Classifying images...", spinner="dots"):
+        summary = image_classification_summary(db, limit=limit)
+
+    if json_output:
+        print(json.dumps(summary, indent=2, default=str))
+        db.close()
+        return
+
+    if summary["total_images"] == 0:
+        console.print("[yellow]No images found in the index.[/yellow]")
+        db.close()
+        return
+
+    console.print(f"  Classified [bold]{summary['total_images']}[/bold] images:\n")
+
+    if summary["categories"]:
+        console.print(Rule("[bold]Image Categories[/bold]", style="bright_black"))
+        _bar_chart(
+            sorted(summary["categories"].items(), key=lambda x: x[1], reverse=True),
+            color="magenta",
+        )
+        console.print()
+
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# activate (license key)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def activate(
+    key: str = typer.Argument(..., help="License key (e.g. DI-PRO-...)"),
+):
+    """Activate a Pro or Team license."""
+    from src.licensing.keys import store_license
+    from src.licensing.tiers import get_tier_display_name, Tier
+
+    _header("License Activation")
+
+    info = store_license(key)
+    if info.valid:
+        tier_name = get_tier_display_name(Tier(info.tier))
+        console.print(Panel(
+            f"[bold green]License activated![/bold green]\n\n"
+            f"  Tier: [bold cyan]{tier_name}[/bold cyan]\n"
+            f"  Expires: {f'in {info.days_remaining} days' if info.days_remaining is not None else 'Never (perpetual)'}",
+            border_style="green",
+        ))
+    else:
+        console.print(Panel(
+            f"[bold red]Invalid license key[/bold red]\n\n"
+            f"  Error: {info.error}\n\n"
+            f"  Get a valid key at https://doc-intelligence.dev/pricing",
+            border_style="red",
+        ))
+
+
+# ---------------------------------------------------------------------------
+# license (show current license status)
+# ---------------------------------------------------------------------------
+
+@app.command("license")
+def license_cmd():
+    """Show current license status."""
+    from src.licensing import get_current_tier, validate_license_key, LicenseInfo, TIER_LIMITS
+    from src.licensing.keys import load_stored_license
+    from src.licensing.tiers import get_tier_display_name, Tier
+
+    _header("License Status")
+
+    tier = get_current_tier()
+    tier_name = get_tier_display_name(tier)
+    info = load_stored_license()
+
+    console.print(f"  Current tier: [bold cyan]{tier_name}[/bold cyan]")
+
+    if info and info.valid:
+        if info.days_remaining is not None:
+            console.print(f"  Expires: in {info.days_remaining} days")
+        else:
+            console.print(f"  Expires: [green]Never (perpetual)[/green]")
+    else:
+        console.print(f"  [dim]No license key stored (using Free tier)[/dim]")
+
+    console.print()
+
+    limits = TIER_LIMITS[tier]
+    table = Table(border_style="bright_black", show_lines=False)
+    table.add_column("Feature", style="cyan")
+    table.add_column("Available", width=12, justify="center")
+
+    for feature, available in limits.items():
+        if feature == "max_files":
+            status = f"[bold]{available if available else 'Unlimited'}[/bold]"
+        elif available:
+            status = "[green]Yes[/green]"
+        else:
+            status = "[red]No[/red] [dim](Pro)[/dim]"
+        table.add_row(feature.replace("_", " ").title(), status)
+
+    console.print(table)
+    console.print()
+
+    if tier == Tier.FREE:
+        console.print("[dim]Upgrade: doc-intelligence activate <KEY>[/dim]")
+        console.print("[dim]Get a key: https://doc-intelligence.dev/pricing[/dim]\n")
+
+
+# ---------------------------------------------------------------------------
+# telemetry
+# ---------------------------------------------------------------------------
+
+@app.command("telemetry")
+def telemetry_cmd(
+    enable: bool = typer.Option(False, "--enable", help="Opt in to anonymous analytics"),
+    disable: bool = typer.Option(False, "--disable", help="Opt out and delete collected data"),
+    show_stats: bool = typer.Option(False, "--stats", help="Show local telemetry stats"),
+):
+    """Manage anonymous usage analytics (OFF by default)."""
+    from src.telemetry import (
+        enable_telemetry, disable_telemetry, is_telemetry_enabled, get_local_stats,
+    )
+
+    if enable:
+        enable_telemetry()
+        console.print(Panel(
+            "[bold green]Telemetry enabled[/bold green]\n\n"
+            "We collect: feature usage counts, error types, platform info.\n"
+            "We NEVER collect: file names, paths, content, or personal data.\n\n"
+            "Opt out anytime: [cyan]doc-intelligence telemetry --disable[/cyan]",
+            border_style="green",
+        ))
+        return
+
+    if disable:
+        disable_telemetry()
+        console.print(Panel(
+            "[bold]Telemetry disabled[/bold]\n\n"
+            "All collected data has been deleted.",
+            border_style="green",
+        ))
+        return
+
+    status = "[green]Enabled[/green]" if is_telemetry_enabled() else "[dim]Disabled (default)[/dim]"
+    console.print(f"  Telemetry: {status}\n")
+
+    if show_stats:
+        stats = get_local_stats()
+        if stats["total_events"]:
+            console.print(f"  Events: {stats['total_events']}")
+            console.print(f"  Errors: {stats['errors']}")
+            for event, count in sorted(stats["event_counts"].items(), key=lambda x: x[1], reverse=True):
+                console.print(f"    {event}: {count}")
+        else:
+            console.print("  [dim]No events collected yet.[/dim]")
+        console.print()
+
+
+# ---------------------------------------------------------------------------
+# setup (first-run onboarding)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def setup():
+    """Run the first-time setup wizard."""
+    from src.onboarding.wizard import run_onboarding, first_run_summary, display_first_run_summary
+
+    config = run_onboarding()
+    if config is None:
+        return
+
+    # Offer to run first scan
+    from rich.prompt import Confirm
+    if Confirm.ask("\nRun your first scan now?", default=True):
+        from scripts.scan import run_scan
+        run_scan()
+
+        # Show summary
+        cfg, db = _open_db()
+        if db:
+            summary = first_run_summary(db)
+            display_first_run_summary(summary)
+            db.close()
+
+
+# ---------------------------------------------------------------------------
+# platform-info
+# ---------------------------------------------------------------------------
+
+@app.command("platform-info")
+def platform_info():
+    """Show platform detection and installation info."""
+    from src.core.platform import detect_platform, get_install_instructions
+
+    info = detect_platform()
+    instructions = get_install_instructions()
+
+    _header("Platform Info")
+
+    table = Table(show_header=False, border_style="bright_black", box=None, padding=(0, 2))
+    table.add_column(style="bold cyan")
+    table.add_column()
+    table.add_row("OS", f"{info.os} {info.os_version}")
+    table.add_row("Architecture", info.arch)
+    table.add_row("Python", info.python_version)
+    table.add_row("Config Dir", str(info.config_dir))
+    table.add_row("Data Dir", str(info.data_dir))
+    table.add_row("Cache Dir", str(info.cache_dir))
+    console.print(table)
+
+    if instructions.get("notes"):
+        console.print()
+        for note in instructions["notes"]:
+            console.print(f"  [dim]• {note}[/dim]")
+
+    console.print()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
     """Entry point for the unified CLI."""
+    # Check for first-run onboarding
+    try:
+        from src.onboarding.wizard import is_first_run
+        if is_first_run() and len(sys.argv) <= 1:
+            console.print(f"\n[bold blue]{_ASCII_LOGO}[/bold blue]")
+            console.print(f"  [bold]{_BRAND}[/bold] v{_VERSION} — [dim]{_TAGLINE}[/dim]\n")
+            console.print("  [yellow]First time? Run [bold]doc-intelligence setup[/bold] to get started.[/yellow]\n")
+    except Exception:
+        pass
+
     app()
 
 
