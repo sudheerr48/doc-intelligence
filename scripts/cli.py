@@ -1063,7 +1063,12 @@ def dashboard(
     port: int = typer.Option(8501, "--port", help="Port for the dashboard"),
 ):
     """Launch the Streamlit web dashboard."""
-    dashboard_script = Path(__file__).parent / "dashboard.py"
+    # Use the new 13-page dashboard in src/dashboard/app.py
+    dashboard_script = Path(__file__).parent.parent / "src" / "dashboard" / "app.py"
+
+    if not dashboard_script.exists():
+        # Fallback to legacy dashboard
+        dashboard_script = Path(__file__).parent / "dashboard.py"
 
     if not dashboard_script.exists():
         console.print("[red]Dashboard script not found.[/red]")
