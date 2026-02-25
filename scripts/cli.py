@@ -64,6 +64,21 @@ _TAGLINE = "Your files, understood."
 _VERSION = "5.0"
 
 
+def _require_pro(feature: str) -> bool:
+    """Check if a Pro feature is available. Shows upgrade panel if not.
+
+    Returns True if allowed, False if blocked.
+    """
+    from src.licensing.tiers import require_feature
+    allowed, msg = require_feature(feature)
+    if not allowed:
+        console.print(Panel(
+            f"[bold yellow]Pro Feature Required[/bold yellow]\n\n{msg}",
+            border_style="yellow", title="Upgrade to Pro",
+        ))
+    return allowed
+
+
 def _header(subtitle: str = ""):
     """Print a branded header."""
     title = f"[bold white]{_BRAND}[/bold white] [dim]v{_VERSION}[/dim]"
@@ -450,6 +465,8 @@ def tag(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic or openai (auto-detected by default)"),
 ):
     """AI-classify files and assign tags (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)."""
+    if not _require_pro("ai_tagging"):
+        return
     try:
         from src.ai import classify_batch, is_ai_available, set_provider, get_provider
     except ImportError:
@@ -547,6 +564,8 @@ def ask(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: anthropic or openai (auto-detected by default)"),
 ):
     """Ask questions about your files in plain English (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)."""
+    if not _require_pro("ai_tagging"):
+        return
     try:
         from src.ai import nl_to_sql, is_ai_available, set_provider
     except ImportError:
@@ -828,6 +847,8 @@ def embed(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Embedding model (default: auto-detected)"),
 ):
     """Generate embeddings for semantic search (requires VOYAGE_API_KEY or OPENAI_API_KEY)."""
+    if not _require_pro("semantic_search"):
+        return
     try:
         from src.ai import generate_embeddings, is_embedding_available
     except ImportError:
@@ -933,6 +954,8 @@ def semantic_search(
     threshold: float = typer.Option(0.3, "--threshold", "-t", help="Minimum similarity score (0-1)"),
 ):
     """Search files by meaning using embeddings (requires VOYAGE_API_KEY or OPENAI_API_KEY)."""
+    if not _require_pro("semantic_search"):
+        return
     try:
         from src.ai import generate_embeddings, is_embedding_available
     except ImportError:
@@ -1025,6 +1048,8 @@ def serve(
     port: int = typer.Option(8765, "--port", help="Port for HTTP transport"),
 ):
     """Start the MCP server for AI assistants (Claude Desktop, VS Code, etc.)."""
+    if not _require_pro("mcp_server"):
+        return
     try:
         from src.mcp.server import run_mcp_server
     except ImportError:
@@ -1136,6 +1161,8 @@ def pii_scan(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Scan indexed files for PII (SSNs, credit cards, emails, phones)."""
+    if not _require_pro("pii_detection"):
+        return
     from src.ai.pii import scan_files_summary
 
     cfg, db = _open_db(config)
@@ -1266,6 +1293,8 @@ def image_classify(
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
 ):
     """Classify images as screenshots, photos, documents, etc."""
+    if not _require_pro("image_classification"):
+        return
     from src.ai.image_classify import image_classification_summary
 
     cfg, db = _open_db(config)

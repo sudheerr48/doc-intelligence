@@ -78,6 +78,21 @@ def run_scan(
     total_removed = 0
     total_size = 0
 
+    # --- Tier enforcement: check file limit ---
+    from src.licensing.tiers import require_file_limit, get_current_tier, Tier, TIER_LIMITS
+    tier = get_current_tier()
+    max_files = TIER_LIMITS[tier]["max_files"]
+    existing_count = db.get_stats()["total_files"]
+    if max_files is not None and existing_count >= max_files:
+        allowed, msg = require_file_limit(existing_count)
+        if not allowed:
+            console.print(Panel(
+                f"[bold yellow]Free Tier Limit[/bold yellow]\n\n{msg}",
+                border_style="yellow", title="Upgrade Required",
+            ))
+            db.close()
+            return
+
     # Build folder list: CLI --path overrides config
     if path:
         folders = [{"path": path, "category": category}]
@@ -121,11 +136,24 @@ def run_scan(
 
         folder_time = time.time() - folder_start
 
-        # Insert new files into database
+        # Insert new files into database (respecting tier file limit)
         if result.new_files:
+            files_to_insert = result.new_files
+            if max_files is not None:
+                current_total = db.get_stats()["total_files"]
+                remaining_capacity = max(0, max_files - current_total)
+                if remaining_capacity < len(files_to_insert):
+                    files_to_insert = files_to_insert[:remaining_capacity]
+                    console.print(
+                        f"  [yellow]Free tier: indexed {remaining_capacity:,} of "
+                        f"{len(result.new_files):,} new files (limit: {max_files:,}).[/yellow]"
+                    )
+                    console.print(
+                        f"  [dim]Upgrade to Pro for unlimited: doc-intelligence activate <KEY>[/dim]"
+                    )
             batch_size = 500
-            for i in range(0, len(result.new_files), batch_size):
-                batch = result.new_files[i:i + batch_size]
+            for i in range(0, len(files_to_insert), batch_size):
+                batch = files_to_insert[i:i + batch_size]
                 db.insert_batch(batch)
 
         # Remove deleted files from database

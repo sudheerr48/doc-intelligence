@@ -7,6 +7,18 @@ def render(db, config):
     st.header("Image Classification")
     st.caption("Classify images as screenshots, photos, documents, diagrams, and more")
 
+    # Tier enforcement
+    from src.licensing.tiers import check_feature
+    if not check_feature("image_classification"):
+        st.warning("**Pro Feature** — Image classification requires a Pro license.")
+        st.markdown(
+            "Upgrade to automatically classify images as screenshots, photos, "
+            "documents, diagrams, and more.\n\n"
+            "```\ndoc-intelligence activate <YOUR-LICENSE-KEY>\n```\n\n"
+            "[Get a Pro license](https://doc-intelligence.dev/pricing)"
+        )
+        return
+
     with st.spinner("Classifying images..."):
         from src.ai.image_classify import image_classification_summary
         summary = image_classification_summary(db)

@@ -165,7 +165,8 @@ class TestTagCommand:
         config_path, _ = populated_db
         result = runner.invoke(app, ["tag", "-c", str(config_path)])
         assert result.exit_code == 0
-        assert "ANTHROPIC_API_KEY" in result.output
+        # Free tier blocks AI tagging before API key check
+        assert "Pro" in result.output or "ANTHROPIC_API_KEY" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -178,4 +179,5 @@ class TestAskCommand:
         config_path, _ = populated_db
         result = runner.invoke(app, ["ask", "show all files", "-c", str(config_path)])
         assert result.exit_code == 0
-        assert "ANTHROPIC_API_KEY" in result.output
+        # Free tier blocks AI features before API key check
+        assert "Pro" in result.output or "ANTHROPIC_API_KEY" in result.output

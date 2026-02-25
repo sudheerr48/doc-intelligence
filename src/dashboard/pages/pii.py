@@ -7,6 +7,18 @@ def render(db, config):
     st.header("PII Detection")
     st.caption("Scan your indexed files for sensitive personal information")
 
+    # Tier enforcement
+    from src.licensing.tiers import check_feature
+    if not check_feature("pii_detection"):
+        st.warning("**Pro Feature** — PII detection requires a Pro license.")
+        st.markdown(
+            "Upgrade to scan your files for Social Security numbers, credit cards, "
+            "emails, and phone numbers.\n\n"
+            "```\ndoc-intelligence activate <YOUR-LICENSE-KEY>\n```\n\n"
+            "[Get a Pro license](https://doc-intelligence.dev/pricing)"
+        )
+        return
+
     col1, col2 = st.columns([3, 1])
     with col2:
         limit = st.number_input("Max files to scan", min_value=10, max_value=5000, value=500)

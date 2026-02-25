@@ -117,3 +117,27 @@ def get_upgrade_message(feature: str) -> str:
         f"Upgrade at https://doc-intelligence.dev/pricing\n"
         f"Or enter your license key: doc-intelligence activate <KEY>"
     )
+
+
+def require_feature(feature: str) -> tuple[bool, str]:
+    """Check if a feature is available. Returns (allowed, message).
+
+    Use this as the standard enforcement gate in CLI commands and dashboard.
+    """
+    if check_feature(feature):
+        return (True, "")
+    return (False, get_upgrade_message(feature.replace("_", " ")))
+
+
+def require_file_limit(current_count: int) -> tuple[bool, str]:
+    """Check file limit. Returns (allowed, message) with count info."""
+    allowed, max_files = check_file_limit(current_count)
+    if allowed:
+        return (True, "")
+    return (
+        False,
+        f"Free tier limit reached: {current_count:,} / {max_files:,} files.\n"
+        f"Upgrade to Pro for unlimited files.\n"
+        f"  https://doc-intelligence.dev/pricing\n"
+        f"  Or: doc-intelligence activate <KEY>"
+    )

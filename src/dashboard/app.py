@@ -105,6 +105,18 @@ with st.sidebar:
     st.caption("v5.0 — 100% Local & Private")
     st.caption("🔒 Your files never leave your machine")
 
+    # Show tier badge in sidebar
+    from src.licensing.tiers import get_current_tier, Tier, get_tier_display_name
+    _tier = get_current_tier()
+    _tier_name = get_tier_display_name(_tier)
+    if _tier == Tier.FREE:
+        st.divider()
+        st.caption(f"Plan: **{_tier_name}** (1,000 files)")
+        st.caption("[Upgrade to Pro →](https://doc-intelligence.dev/pricing)")
+    else:
+        st.divider()
+        st.caption(f"Plan: **{_tier_name}** ✓")
+
 # ------------------------------------------------------------------
 # Load database
 # ------------------------------------------------------------------
